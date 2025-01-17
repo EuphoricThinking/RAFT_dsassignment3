@@ -9,6 +9,12 @@ mod domain;
 #[non_exhaustive]
 pub struct Raft {
     // TODO you can add fields to this struct.
+    process_type: ProcessType,
+    config: ServerConfig,
+    persistent_state: PersistentState,
+    /// Identifier of a process which is thought to be the leader.
+    leader_id: Option<Uuid>,
+    sender: Box<dyn RaftSender>,
 }
 
 impl Raft {
@@ -23,6 +29,14 @@ impl Raft {
         message_sender: Box<dyn RaftSender>,
     ) -> ModuleRef<Self> {
         todo!()
+    }
+
+    async fn broadcast(&self, msg: RaftMessage) {
+        for i in self.config.servers {
+            if i != self.config.self_id {
+                self.sender.send(target, msg);
+            }
+        }
     }
 }
 
