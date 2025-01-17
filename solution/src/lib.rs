@@ -121,6 +121,19 @@ impl Raft {
         self.update_storage().await;
     }
 
+    async fn convert_to_follower_if_term_newer(&mut self, current_term: u64) {
+        // safety check
+        if self.persistent_state.current_term < current_term {
+            self.persistent_state.current_term = current_term;
+            self.update_storage().await;
+
+            self.persistent_state.voted_for = None;
+            self.update_storage().await;
+
+            self.leader_id = None;
+        }
+    }
+
     async fn handle_request_vote(&mut self, request_vote: RequestVoteArgs, request_header: RaftMessageHeader) {
         let RequestVoteArgs { last_log_index, last_log_term } = request_vote;
         let RaftMessageHeader { source, term } = request_header;
@@ -132,10 +145,15 @@ impl Raft {
             self.send_request_response(source, false).await;
         }
         else {
+            if self.persistent_state.current_term < term {
+                // convert to a follower
+
+            }
             // if log is at least as up-to-date as mine - grant vote, update your vote
             match self.persistent_state.voted_for {
                 None => {
                     if self.is_other_log_at_least_as_up_to_date_as_self(last_log_index, last_log_term) {
+                        self.convert_to_follower_if_term_newer(last_log_term).await;
                         self.update_candidate(source).await;
                     }
                 }, 
@@ -166,7 +184,7 @@ impl Handler<RaftMessage> for Raft {
 
             },
             RaftMessageContent::RequestVote(request_vote_args) => {
-                self.handle_request_vote(request_vote_args, header);
+                self.handle_request_vote(request_vote_args, header).await;
             },
             RaftMessageContent::RequestVoteResponse(request_vote_response) => {
                 self.handle_request_response(request_vote_response).await;
