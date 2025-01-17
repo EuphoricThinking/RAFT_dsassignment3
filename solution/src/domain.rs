@@ -59,18 +59,18 @@ pub enum ClientRequestContent {
     /// Apply a command to the state machine.
     Command {
         command: Vec<u8>,
-        client_id: Uuid,
-        sequence_num: u64,
-        lowest_sequence_num_without_response: u64,
+        client_id: Uuid, // client session USE
+        sequence_num: u64, // client session USE
+        lowest_sequence_num_without_response: u64, // client session
     },
     /// Create a snapshot of the current state of the state machine.
     Snapshot,
     /// Add a server to the cluster.
-    AddServer { new_server: Uuid },
+    AddServer { new_server: Uuid }, // cluster change
     /// Remove a server from the cluster.
-    RemoveServer { old_server: Uuid },
+    RemoveServer { old_server: Uuid }, // cluster change
     /// Open a new client session.
-    RegisterClient,
+    RegisterClient, // client session
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -230,6 +230,18 @@ pub struct AppendEntriesResponseArgs {
     /// The last log index that appears in the corresponding `AppendEntries` message, used
     /// for updating nextIndex and matchIndex in case of success. Equal to
     /// `prev_log_index + entries.len()` from the `AppendEntries` message.
+    /// 
+    
+    /*
+    If term is not correct - success: false, send your header, header includes term and leader knows it was term issue; leader updates its term
+    If there is not such a matching entry - success: false, we know from the header that the term is correct, it must be matching issue (the term might be smaller, then we have to add new operations)
+
+    we decrement nextIndex till we find the last matching
+    we find matching - there is success
+    we know from last_verified log index the last applied, log, therefore we know how many batches or logs in a single batch we have to send (if we have to send logs within a batch or multiple batches), since we wouldn't know otherwise, whether there is a match on the entry find from decremental iteration or normal operation
+
+    If we manage to find matching index through decrementing nextIdx, we receive matchIdx + 1 = nextIdx, then we can send logs as task description intended
+     */
     pub last_verified_log_index: usize,
 }
 
