@@ -131,16 +131,14 @@ impl Raft {
         self.update_storage().await;    
     }
 
-    async fn convert_to_follower_if_term_newer(&mut self, current_term: u64) {
-        if self.persistent_state.current_term < current_term {
-            self.update_term(current_term).await;
+    async fn convert_to_follower(&mut self, current_term: u64) {
+        self.update_term(current_term).await;
 
-            self.persistent_state.voted_for = None;
-            self.update_storage().await;
+        self.persistent_state.voted_for = None;
+        self.update_storage().await;
 
-            self.leader_id = None;
-            self.process_type = ProcessType::Follower;
-        }
+        self.leader_id = None;
+        self.process_type = ProcessType::Follower;
     }
     
     async fn reset_timer(&mut self, interval: Duration) {
@@ -175,9 +173,27 @@ impl Raft {
             // match self.persistent_state.voted_for {
             //     None => {
             if self.is_other_log_at_least_as_up_to_date_as_self(last_log_index, last_log_term) {
-                self.convert_to_follower_if_term_newer(last_log_term).await;
-                self.update_candidate(source).await;
-                self.send_request_response(source, true).await;
+                // TODO check
+                if self.persistent_state.current_term < term {
+                    // convert to a follower if a term is newer, grant a vote
+                    self.convert_to_follower(term).await;
+                    self.update_candidate(source).await;
+                    self.send_request_response(source, true).await;
+                }
+                else {
+                    // we have ruled out self_term > term and self_term < term,
+                    // there is only self_term == term left
+                    match self.persistent_state.voted_for {
+                        None => {
+                            self.update_candidate(source).await;
+                            self.send_request_response(source, true).await;
+                        },
+                        Some(_) => {
+                            // we have already voted
+                            self.send_request_response(source, false).await;
+                        }
+                    }
+                }
             }
             else {
                 self.send_request_response(source, false).await;
