@@ -18,6 +18,7 @@ pub struct Raft {
     /// Identifier of a process which is thought to be the leader.
     leader_id: Option<Uuid>,
     sender: Box<dyn RaftSender>,
+    storage: Box<dyn StableStorage>,
     // sending_set: HashSet<Uuid>,
 }
 
@@ -56,55 +57,78 @@ impl Raft {
         header
     }
 
-    fn get_last_log_and_idx(&self) -> (Option<&LogEntry>, usize)  {
-        return (self.persistent_state.log.last(), self.persistent_state.log.len());
+    fn get_candidate_log_and_idx(&self) -> (u64, usize)  {
+        // return (self.persistent_state.log.last(), self.persistent_state.log.len());
+        return (self.persistent_state.candidate_term, self.persistent_state.candidate_idx);
     }
 
-    fn is_other_log_at_least_as_up_to_date_as_self(&self, last_log_index: usize, last_log_term: u64) -> bool {
+    fn is_other_log_at_least_as_up_to_date_as_our_candidate(&self, last_log_index: usize, last_log_term: u64) -> bool {
         // let self_last_log_idx
-        let (self_log, self_idx) = self.get_last_log_and_idx();
+        let (self_term, self_idx) = self.get_candidate_log_and_idx();
 
-        match self_log {
-            // idx zero for empty log
-            None =>  {
-            // the sent log has either no elements (as our log),
-            // thus it is as up-to-date as ours
-            // or can have any entry, which is more up-to-date as ours
-                return true;
-            },
-
-            Some(log) => {
-                let self_term = log.term;
-                
-                if last_log_term > self_term {
-                    // our term is older
-                    return true;
-                }
-                else { 
-                    return (self_term == last_log_term) && (self_idx <= last_log_index);
-                }
-            }
+        
+        if last_log_term > self_term {
+            // our term is older
+            return true;
+        }
+        else { 
+            return (self_term == last_log_term) && (self_idx <= last_log_index);
         }
     } 
+
+    async fn send_request_vote_response(&self, source: Uuid, is_vote_granted: bool) {
+        let self_header = self.get_self_header();
+        let response = RaftMessage{
+            header: self_header,
+            content: RaftMessageContent::RequestVoteResponse(RequestVoteResponseArgs { vote_granted: is_vote_granted }),
+        };
+
+        self.sender.send(&source, response).await;
+    }
+
+    async fn save_persistent_storage(&mut self) {
+        let serialized_persistent = bincode::serialize(&self.persistent_state);
+
+        if let Ok(result) = serialized_persistent {
+            let self_key = self.config.self_id.to_string();
+            self.storage.put(&self_key, &result).await;
+        }
+    }
+
+    async fn update_candidate(&mut self, candidate_id: Uuid, candidate_term: u64, candidate_idx: usize) {
+        self.persistent_state.voted_for = Some(candidate_id);
+        self.save_persistent_storage().await;
+
+        self.persistent_state.candidate_term = candidate_term;
+        self.save_persistent_storage().await;
+
+        self.persistent_state.candidate_idx = candidate_idx;
+        self.save_persistent_storage().await;
+    }
 
     async fn handle_request_vote(&mut self, request_vote: RequestVoteArgs, request_header: RaftMessageHeader) {
         let RequestVoteArgs { last_log_index, last_log_term } = request_vote;
         let RaftMessageHeader { source, term } = request_header;
 
         // if our term is newer - reject the message
-        // leader sets himself as a leader
+        // leader sets himself as a leader - reject
         // if we are connected to the leader - reject
         if self.persistent_state.current_term > term || self.leader_id.is_some() {
-            let self_header = self.get_self_header();
-            let response = RaftMessage{
-                header: self_header,
-                content: RaftMessageContent::RequestVoteResponse(RequestVoteResponseArgs { vote_granted: false }),
-            };
-
-            self.sender.send(&source, response).await;
+            self.send_request_vote_response(source, false).await;
         }
         else {
             // if log is at least as up-to-date as mine - grant vote, update your vote
+            match self.persistent_state.voted_for {
+                None => {
+                    self.send_request_vote_response(source, true).await;
+                },
+                Some(candidate_id) => {
+                    if self.is_other_log_at_least_as_up_to_date_as_our_candidate(last_log_index, last_log_term) {
+                        // grant vote
+                        self.send_request_vote_response(source, true).await;
+                    }
+                },
+            }
         }
     }
 }
