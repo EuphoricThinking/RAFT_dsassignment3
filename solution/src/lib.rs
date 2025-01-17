@@ -46,9 +46,32 @@ impl Raft {
         }
     }
 
-    fn handle_request_vote(&mut self, request_vote: RequestVoteArgs, request_header: RaftMessageHeader) {
+    fn get_self_header(&self) -> RaftMessageHeader {
+        let header = RaftMessageHeader{
+            source: self.config.self_id,
+            term: self.persistent_state.current_term,
+        };
+
+        header
+    }
+
+    async fn handle_request_vote(&mut self, request_vote: RequestVoteArgs, request_header: RaftMessageHeader) {
         let RequestVoteArgs { last_log_index, last_log_term } = request_vote;
         let RaftMessageHeader { source, term } = request_header;
+
+        // if our term is newer - reject the message
+        if self.persistent_state.current_term > term {
+            let self_header = self.get_self_header();
+            let response = RaftMessage{
+                header: self_header,
+                content: RaftMessageContent::RequestVoteResponse(RequestVoteResponseArgs { vote_granted: false }),
+            };
+
+            self.sender.send(&source, response).await;
+        }
+        else {
+
+        }
     }
 }
 

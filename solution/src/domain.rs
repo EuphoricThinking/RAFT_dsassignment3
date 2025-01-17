@@ -295,14 +295,14 @@ pub enum ProcessType {
 
 /// State of a Raft process.
 /// It shall be kept in stable storage, and updated before replying to messages.
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone)]
 pub(crate) struct PersistentState {
     /// Number of the current term. `0` at boot.
     pub(crate) current_term: u64,
     /// Identifier of a process which has received this process' vote.
     /// `None if this process has not voted in this term.
-    voted_for: Option<Uuid>,
+    pub(crate) voted_for: Option<Uuid>,
     // /// Identifier of a process which is thought to be the leader.
     // leader_id: Option<Uuid>,
-    log: Vec<LogEntry>,
+    pub(crate) log: Vec<LogEntry>,
 }
