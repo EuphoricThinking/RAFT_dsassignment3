@@ -32,6 +32,7 @@ impl Raft {
         stable_storage: Box<dyn StableStorage>,
         message_sender: Box<dyn RaftSender>,
     ) -> ModuleRef<Self> {
+        // recover
 
         todo!()
     }
@@ -55,12 +56,46 @@ impl Raft {
         header
     }
 
+    fn get_last_log_and_idx(&self) -> (Option<&LogEntry>, usize)  {
+        return (self.persistent_state.log.last(), self.persistent_state.log.len());
+    }
+
+    fn is_other_log_at_least_as_up_to_date_as_self(&self, last_log_index: usize, last_log_term: u64) -> bool {
+        // let self_last_log_idx
+        let (self_log, self_idx) = self.get_last_log_and_idx();
+
+        // idx zero for empty log
+        if self_log.is_none() {
+            // the sent log has either no elements (as our log),
+            // thus it is as up-to-date as ours
+            // or can have any entry, which is more up-to-date as ours
+            return true;
+        }
+        else if let Some(log) = self_log {
+            let self_term = log.term;
+            if last_log_term > self_term {
+                // our term is newer
+               return true;
+            }
+            else { 
+                return (self_term == last_log_term) && (self_idx <= last_log_index);
+            }
+        }
+        else {
+
+        }
+
+        unimplemented!()
+    } 
+
     async fn handle_request_vote(&mut self, request_vote: RequestVoteArgs, request_header: RaftMessageHeader) {
         let RequestVoteArgs { last_log_index, last_log_term } = request_vote;
         let RaftMessageHeader { source, term } = request_header;
 
         // if our term is newer - reject the message
-        if self.persistent_state.current_term > term {
+        // leader sets himself as a leader
+        // if we are connected to the leader - reject
+        if self.persistent_state.current_term > term || self.leader_id.is_some() {
             let self_header = self.get_self_header();
             let response = RaftMessage{
                 header: self_header,
@@ -70,7 +105,7 @@ impl Raft {
             self.sender.send(&source, response).await;
         }
         else {
-
+            // if log is at least as up-to-date as mine - grant vote, update your vote
         }
     }
 }
