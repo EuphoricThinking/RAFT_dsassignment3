@@ -1,6 +1,9 @@
 use std::time::SystemTime;
 
 use module_system::{Handler, ModuleRef, System};
+use uuid::Uuid;
+use std::collections::HashSet;
+use std::future::Future;
 
 pub use domain::*;
 
@@ -15,6 +18,7 @@ pub struct Raft {
     /// Identifier of a process which is thought to be the leader.
     leader_id: Option<Uuid>,
     sender: Box<dyn RaftSender>,
+    // sending_set: HashSet<Uuid>,
 }
 
 impl Raft {
@@ -28,15 +32,23 @@ impl Raft {
         stable_storage: Box<dyn StableStorage>,
         message_sender: Box<dyn RaftSender>,
     ) -> ModuleRef<Self> {
+
         todo!()
     }
 
-    async fn broadcast(&self, msg: RaftMessage) {
-        for i in self.config.servers {
-            if i != self.config.self_id {
-                self.sender.send(target, msg);
+    async fn broadcast(&self, msg: RaftMessage) { 
+        // TODO change to join_all?
+        // let futures: Vec<Future> = Vec::new();
+        for target in &self.config.servers {
+            if *target != self.config.self_id {
+                self.sender.send(&target, msg.clone()).await;
             }
         }
+    }
+
+    fn handle_request_vote(&mut self, request_vote: RequestVoteArgs, request_header: RaftMessageHeader) {
+        let RequestVoteArgs { last_log_index, last_log_term } = request_vote;
+        let RaftMessageHeader { source, term } = request_header;
     }
 }
 
@@ -52,10 +64,10 @@ impl Handler<RaftMessage> for Raft {
             RaftMessageContent::AppendEntriesResponse(AppendEntriesResponseArgs { success, last_verified_log_index }) => {
 
             },
-            RaftMessageContent::RequestVote(RequestVoteArgs { last_log_index, last_log_term }) => {
-
+            RaftMessageContent::RequestVote(request_vote_args) => {
+                self.handle_request_vote(request_vote_args, header);
             },
-            RaftMessageContent::RequestVoteResponse(RequestVoteArgs { last_log_index, last_log_term }) => {
+            RaftMessageContent::RequestVoteResponse(RequestVoteResponseArgs { vote_granted }) => {
 
             },
             RaftMessageContent::InstallSnapshot(InstallSnapshotArgs { last_included_index, last_included_term, last_config, client_sessions, offset, data, done }) => {
