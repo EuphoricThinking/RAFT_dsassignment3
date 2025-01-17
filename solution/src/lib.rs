@@ -5,6 +5,7 @@ use uuid::Uuid;
 use std::collections::HashSet;
 use std::future::Future;
 use tokio::time::Duration;
+use rand::{self, Rng};
 
 pub use domain::*;
 
@@ -141,7 +142,9 @@ impl Raft {
         self.process_type = ProcessType::Follower;
     }
     
-    async fn reset_timer(&mut self, interval: Duration) {
+    async fn reset_election_timer(&mut self) {
+        let interval= rand::thread_rng().gen_range(self.config.election_timeout_range.clone());
+        
         if let Some(handle) = self.election_timer.take() {
             handle.stop().await;
         }
