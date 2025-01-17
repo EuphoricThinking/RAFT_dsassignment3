@@ -305,6 +305,6 @@ pub(crate) struct PersistentState {
     // /// Identifier of a process which is thought to be the leader.
     // leader_id: Option<Uuid>,
     pub(crate) log: Vec<LogEntry>,
-    pub(crate) candidate_idx: usize,
-    pub(crate) candidate_term: u64,
+    // pub(crate) candidate_idx: usize,
+    // pub(crate) candidate_term: u64,
 }

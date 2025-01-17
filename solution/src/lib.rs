@@ -57,18 +57,30 @@ impl Raft {
         header
     }
 
-    fn get_candidate_log_and_idx(&self) -> (u64, usize)  {
+    async fn get_candidate_log_and_idx(&self, candidate_id: Uuid) -> (u64, usize)  {
         // return (self.persistent_state.log.last(), self.persistent_state.log.len());
-        return (self.persistent_state.candidate_term, self.persistent_state.candidate_idx);
+        // return (self.persistent_state.candidate_term, self.persistent_state.candidate_idx);
+            let candidate_state = self.storage.get(&candidate_id.to_string()).await;
+            match candidate_state {
+                None => return (0, 0),
+                Some(state) => {
+                    let deserialized_state: Result<PersistentState, Box<bincode::ErrorKind>> = bincode::deserialize(&state);
+                    if let Ok(candidate_data) = deserialized_state {
+                        return (candidate_data.current_term, candidate_data.log.len() + 1); // +1 for configuration
+                    }
+
+                    return (0, 0);
+                }
+            }
     }
 
-    fn is_other_log_at_least_as_up_to_date_as_our_candidate(&self, last_log_index: usize, last_log_term: u64) -> bool {
+    async fn is_other_log_at_least_as_up_to_date_as_our_candidate(&self, last_log_index: usize, last_log_term: u64, candidate_id: Uuid) -> bool {
         // let self_last_log_idx
-        let (self_term, self_idx) = self.get_candidate_log_and_idx();
-
         
+        let (self_term, self_idx) = self.get_candidate_log_and_idx(candidate_id).await;
+
         if last_log_term > self_term {
-            // our term is older
+        // our term is older
             return true;
         }
         else { 
@@ -95,15 +107,15 @@ impl Raft {
         }
     }
 
-    async fn update_candidate(&mut self, candidate_id: Uuid, candidate_term: u64, candidate_idx: usize) {
+    async fn update_candidate(&mut self, candidate_id: Uuid) { //}, candidate_term: u64, candidate_idx: usize) {
         self.persistent_state.voted_for = Some(candidate_id);
         self.save_persistent_storage().await;
 
-        self.persistent_state.candidate_term = candidate_term;
-        self.save_persistent_storage().await;
+        // self.persistent_state.candidate_term = candidate_term;
+        // self.save_persistent_storage().await;
 
-        self.persistent_state.candidate_idx = candidate_idx;
-        self.save_persistent_storage().await;
+        // self.persistent_state.candidate_idx = candidate_idx;
+        // self.save_persistent_storage().await;
     }
 
     async fn handle_request_vote(&mut self, request_vote: RequestVoteArgs, request_header: RaftMessageHeader) {
@@ -123,7 +135,7 @@ impl Raft {
                     self.send_request_vote_response(source, true).await;
                 },
                 Some(candidate_id) => {
-                    if self.is_other_log_at_least_as_up_to_date_as_our_candidate(last_log_index, last_log_term) {
+                    if self.is_other_log_at_least_as_up_to_date_as_our_candidate(last_log_index, last_log_term, candidate_id).await {
                         // grant vote
                         self.send_request_vote_response(source, true).await;
                     }
