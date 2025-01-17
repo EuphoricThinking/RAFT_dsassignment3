@@ -306,3 +306,6 @@ pub(crate) struct PersistentState {
     // leader_id: Option<Uuid>,
     pub(crate) log: Vec<LogEntry>,
 }
+
+#[derive (Clone)]
+pub struct ElectionTimeout;

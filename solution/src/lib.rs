@@ -1,9 +1,10 @@
 use std::time::SystemTime;
 
-use module_system::{Handler, ModuleRef, System};
+use module_system::{Handler, ModuleRef, System, TimerHandle};
 use uuid::Uuid;
 use std::collections::HashSet;
 use std::future::Future;
+use tokio::time::Duration;
 
 pub use domain::*;
 
@@ -19,7 +20,12 @@ pub struct Raft {
     leader_id: Option<Uuid>,
     sender: Box<dyn RaftSender>,
     storage: Box<dyn StableStorage>,
+    granted_votes: HashSet<Uuid>,
     // sending_set: HashSet<Uuid>,
+    election_timer: Option<TimerHandle>,
+    enabled: bool,
+    self_ref: Option<ModuleRef<Self>>,
+    heartbeat_timer: Option<TimerHandle>,
 }
 
 impl Raft {
@@ -133,6 +139,19 @@ impl Raft {
             self.leader_id = None;
         }
     }
+    
+    async fn reset_timer(&mut self, interval: Duration) {
+        if let Some(handle) = self.election_timer.take() {
+            handle.stop().await;
+        }
+        self.election_timer = Some(
+            self.self_ref
+                .as_ref()
+                .unwrap()
+                .request_tick(ElectionTimeout, interval)
+                .await,
+        );
+    }
 
     async fn handle_request_vote(&mut self, request_vote: RequestVoteArgs, request_header: RaftMessageHeader) {
         let RequestVoteArgs { last_log_index, last_log_term } = request_vote;
@@ -227,3 +246,9 @@ impl Handler<ClientRequest> for Raft {
 }
 
 // TODO you can implement handlers of messages of other types for the Raft struct.
+/// Handle timer timeout.
+#[async_trait::async_trait]
+impl Handler<ElectionTimeout> for Raft {
+    async fn handle(&mut self, _self_ref: &ModuleRef<Self>, _: ElectionTimeout) {
+    }
+}
