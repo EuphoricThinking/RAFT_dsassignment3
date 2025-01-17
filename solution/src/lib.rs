@@ -23,7 +23,6 @@ pub struct Raft {
     granted_votes: HashSet<Uuid>,
     // sending_set: HashSet<Uuid>,
     election_timer: Option<TimerHandle>,
-    enabled: bool,
     self_ref: Option<ModuleRef<Self>>,
     heartbeat_timer: Option<TimerHandle>,
 }
@@ -127,16 +126,20 @@ impl Raft {
         self.update_storage().await;
     }
 
+    async fn update_term(&mut self, new_term: u64) {
+        self.persistent_state.current_term = new_term;
+        self.update_storage().await;    
+    }
+
     async fn convert_to_follower_if_term_newer(&mut self, current_term: u64) {
-        // safety check
         if self.persistent_state.current_term < current_term {
-            self.persistent_state.current_term = current_term;
-            self.update_storage().await;
+            self.update_term(current_term).await;
 
             self.persistent_state.voted_for = None;
             self.update_storage().await;
 
             self.leader_id = None;
+            self.process_type = ProcessType::Follower;
         }
     }
     
@@ -164,25 +167,29 @@ impl Raft {
             self.send_request_response(source, false).await;
         }
         else {
-            if self.persistent_state.current_term < term {
-                // convert to a follower
+            // if self.persistent_state.current_term < term {
+            //     // convert to a follower
 
-            }
+            // }
             // if log is at least as up-to-date as mine - grant vote, update your vote
-            match self.persistent_state.voted_for {
-                None => {
-                    if self.is_other_log_at_least_as_up_to_date_as_self(last_log_index, last_log_term) {
-                        self.convert_to_follower_if_term_newer(last_log_term).await;
-                        self.update_candidate(source).await;
-                    }
-                }, 
-                Some(_candidate_id) => {
-                    if self.is_other_log_at_least_as_up_to_date_as_self(last_log_index, last_log_term) {
-
-                    }
-                },
+            // match self.persistent_state.voted_for {
+            //     None => {
+            if self.is_other_log_at_least_as_up_to_date_as_self(last_log_index, last_log_term) {
+                self.convert_to_follower_if_term_newer(last_log_term).await;
+                self.update_candidate(source).await;
+                self.send_request_response(source, true).await;
             }
-        }
+            else {
+                self.send_request_response(source, false).await;
+            }
+                // }, 
+                // Some(_candidate_id) => {
+                //     // if self.is_other_log_at_least_as_up_to_date_as_self(last_log_index, last_log_term) {
+
+                //     // }
+            
+                // },
+            }
     }
 
     async fn handle_request_response(&mut self, request_response: RequestVoteResponseArgs) {
