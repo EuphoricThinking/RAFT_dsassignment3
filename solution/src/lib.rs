@@ -64,28 +64,27 @@ impl Raft {
         // let self_last_log_idx
         let (self_log, self_idx) = self.get_last_log_and_idx();
 
-        // idx zero for empty log
-        if self_log.is_none() {
+        match self_log {
+            // idx zero for empty log
+            None =>  {
             // the sent log has either no elements (as our log),
             // thus it is as up-to-date as ours
             // or can have any entry, which is more up-to-date as ours
-            return true;
-        }
-        else if let Some(log) = self_log {
-            let self_term = log.term;
-            if last_log_term > self_term {
-                // our term is newer
-               return true;
-            }
-            else { 
-                return (self_term == last_log_term) && (self_idx <= last_log_index);
-            }
-        }
-        else {
+                return true;
+            },
 
+            Some(log) => {
+                let self_term = log.term;
+                
+                if last_log_term > self_term {
+                    // our term is older
+                    return true;
+                }
+                else { 
+                    return (self_term == last_log_term) && (self_idx <= last_log_index);
+                }
+            }
         }
-
-        unimplemented!()
     } 
 
     async fn handle_request_vote(&mut self, request_vote: RequestVoteArgs, request_header: RaftMessageHeader) {
