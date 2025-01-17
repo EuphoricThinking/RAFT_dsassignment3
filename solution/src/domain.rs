@@ -295,7 +295,7 @@ pub enum ProcessType {
 
 /// State of a Raft process.
 /// It shall be kept in stable storage, and updated before replying to messages.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub(crate) struct PersistentState {
     /// Number of the current term. `0` at boot.
     pub(crate) current_term: u64,

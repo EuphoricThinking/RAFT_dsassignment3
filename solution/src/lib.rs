@@ -18,6 +18,7 @@ pub struct Raft {
     /// Identifier of a process which is thought to be the leader.
     leader_id: Option<Uuid>,
     sender: Box<dyn RaftSender>,
+    storage: Box<dyn StableStorage>,
     // sending_set: HashSet<Uuid>,
 }
 
@@ -87,6 +88,39 @@ impl Raft {
         }
     } 
 
+    async fn send_request_response(&self, source: Uuid, vote: bool) {
+        let self_header = self.get_self_header();
+            let response = RaftMessage{
+                header: self_header,
+                content: RaftMessageContent::RequestVoteResponse(RequestVoteResponseArgs { vote_granted: vote }),
+            };
+
+            self.sender.send(&source, response).await;
+    }
+
+    async fn update_storage(&mut self) {
+        let serialized_storage = bincode::serialize(&self.persistent_state);
+        match serialized_storage {
+            Err(_) => {
+                panic!("Serialize storage error");
+            },
+            Ok(res) => {
+                let storage_res = self.storage.put(&self.config.self_id.to_string(), &res).await;
+                match storage_res {
+                    Err(msg) => {
+                        panic!("{}", msg);
+                    },
+                    Ok(_) => {},
+                }
+            }
+        }
+    }
+
+    async fn update_candidate(&mut self, candidate_id: Uuid) {
+        self.persistent_state.voted_for = Some(candidate_id);
+        self.update_storage().await;
+    }
+
     async fn handle_request_vote(&mut self, request_vote: RequestVoteArgs, request_header: RaftMessageHeader) {
         let RequestVoteArgs { last_log_index, last_log_term } = request_vote;
         let RaftMessageHeader { source, term } = request_header;
@@ -95,17 +129,27 @@ impl Raft {
         // leader sets himself as a leader
         // if we are connected to the leader - reject
         if self.persistent_state.current_term > term || self.leader_id.is_some() {
-            let self_header = self.get_self_header();
-            let response = RaftMessage{
-                header: self_header,
-                content: RaftMessageContent::RequestVoteResponse(RequestVoteResponseArgs { vote_granted: false }),
-            };
-
-            self.sender.send(&source, response).await;
+            self.send_request_response(source, false).await;
         }
         else {
             // if log is at least as up-to-date as mine - grant vote, update your vote
+            match self.persistent_state.voted_for {
+                None => {
+                    if self.is_other_log_at_least_as_up_to_date_as_self(last_log_index, last_log_term) {
+                        self.update_candidate(source).await;
+                    }
+                }, 
+                Some(_candidate_id) => {
+                    if self.is_other_log_at_least_as_up_to_date_as_self(last_log_index, last_log_term) {
+
+                    }
+                },
+            }
         }
+    }
+
+    async fn handle_request_response(&mut self, request_response: RequestVoteResponseArgs) {
+
     }
 }
 
@@ -124,8 +168,8 @@ impl Handler<RaftMessage> for Raft {
             RaftMessageContent::RequestVote(request_vote_args) => {
                 self.handle_request_vote(request_vote_args, header);
             },
-            RaftMessageContent::RequestVoteResponse(RequestVoteResponseArgs { vote_granted }) => {
-
+            RaftMessageContent::RequestVoteResponse(request_vote_response) => {
+                self.handle_request_response(request_vote_response).await;
             },
             RaftMessageContent::InstallSnapshot(InstallSnapshotArgs { last_included_index, last_included_term, last_config, client_sessions, offset, data, done }) => {
 
