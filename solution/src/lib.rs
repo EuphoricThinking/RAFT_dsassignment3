@@ -311,8 +311,54 @@ impl Raft {
             }
 
             if votes_received.len() > (self.config.servers.len() / 2) {
-
+                self.become_a_leader().await;
             }
+        }
+    }
+
+    fn get_append_entry_response(&self, success: bool, last_verified_log_index: usize) -> RaftMessage {
+        let header = self.get_self_header();
+        let args = AppendEntriesResponseArgs{
+            success: success,
+            last_verified_log_index: last_verified_log_index,
+        };
+        let content = RaftMessageContent::AppendEntriesResponse(args);
+
+        return RaftMessage{header: header, content: content};
+
+        // unimplemented!()
+    }
+
+    fn get_last_verified_log_index(&self, append_entries: &AppendEntriesArgs) -> usize {
+        return append_entries.entries.len() + append_entries.prev_log_index;
+    }
+
+    async fn send_append_entry_response(&mut self, success: bool, last_verified_log_index: usize, source: Uuid) {
+        let response = self.get_append_entry_response(success, last_verified_log_index);
+        
+        self.sender.send(&source, response).await;
+    }
+
+    async fn handle_append_entries(&mut self, append_entries: AppendEntriesArgs, header: RaftMessageHeader) {
+        let last_verified_log_index = self.get_last_verified_log_index(&append_entries);
+
+        let AppendEntriesArgs { prev_log_index, prev_log_term, entries, leader_commit } = append_entries;
+
+        let RaftMessageHeader{source, term} = header;
+
+        if self.persistent_state.current_term > term {
+
+        }
+        match &mut self.process_type {
+            ProcessType::Candidate { votes_received } => {
+
+            },
+            ProcessType::Follower => {
+
+            },
+            ProcessType::Leader => {
+
+            },
         }
     }
 }
@@ -323,8 +369,8 @@ impl Handler<RaftMessage> for Raft {
         let RaftMessage { header, content } = msg;
 
         match content {
-            RaftMessageContent::AppendEntries(AppendEntriesArgs { prev_log_index, prev_log_term, entries, leader_commit }) => {
-
+            RaftMessageContent::AppendEntries(append_entries) => {
+                self.handle_append_entries(append_entries, header).await;
             },
             RaftMessageContent::AppendEntriesResponse(AppendEntriesResponseArgs { success, last_verified_log_index }) => {
 
@@ -387,6 +433,7 @@ impl Handler<HeartbeatTick> for Raft {
             self.broadcast_heartbeat().await;
         }
         else if let Some(handle) = self.heartbeat_timer.take() {
+            // the leader is a leader till the end of its tenure, therefore the leadership change is not expected; however, safety never hurt anybody
             handle.stop().await;
         }
     }
