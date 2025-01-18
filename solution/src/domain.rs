@@ -309,3 +309,6 @@ pub(crate) struct PersistentState {
 
 #[derive (Clone)]
 pub struct ElectionTimeout;
+
+#[derive (Clone)]
+pub struct HeartbeatTick;

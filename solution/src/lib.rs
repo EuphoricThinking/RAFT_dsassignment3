@@ -1,4 +1,4 @@
-use std::time::SystemTime;
+use std::{collections::HashMap, intrinsics::mir::PtrMetadata, time::SystemTime};
 
 use module_system::{Handler, ModuleRef, System, TimerHandle};
 use uuid::Uuid;
@@ -11,6 +11,8 @@ pub use domain::*;
 
 mod domain;
 
+type LeaderMap = HashMap<Uuid, usize>;
+
 #[non_exhaustive]
 pub struct Raft {
     // TODO you can add fields to this struct.
@@ -21,11 +23,15 @@ pub struct Raft {
     leader_id: Option<Uuid>,
     sender: Box<dyn RaftSender>,
     storage: Box<dyn StableStorage>,
-    granted_votes: HashSet<Uuid>,
+    // granted_votes: HashSet<Uuid>,
     // sending_set: HashSet<Uuid>,
     election_timer: Option<TimerHandle>,
     self_ref: Option<ModuleRef<Self>>,
     heartbeat_timer: Option<TimerHandle>,
+    
+    // leader attributes
+    next_index: LeaderMap,
+    match_index: LeaderMap,
 }
 
 impl Raft {
@@ -64,7 +70,8 @@ impl Raft {
     }
 
     fn get_last_log_and_idx(&self) -> (Option<&LogEntry>, usize)  {
-        return (self.persistent_state.log.last(), self.persistent_state.log.len());
+        // return (self.persistent_state.log.last(), self.persistent_state.log.len());
+        return (self.persistent_state.log.last(), self.get_last_log_idx());
     }
 
     fn is_other_log_at_least_as_up_to_date_as_self(&self, last_log_index: usize, last_log_term: u64) -> bool {
@@ -144,7 +151,7 @@ impl Raft {
     
     async fn reset_election_timer(&mut self) {
         let interval= rand::thread_rng().gen_range(self.config.election_timeout_range.clone());
-        
+
         if let Some(handle) = self.election_timer.take() {
             handle.stop().await;
         }
@@ -211,8 +218,60 @@ impl Raft {
             }
     }
 
-    async fn handle_request_response(&mut self, request_response: RequestVoteResponseArgs) {
+    fn is_candidate(&self) -> bool {
+        if let Some(candidate_id) = self.persistent_state.voted_for {
+            return candidate_id == self.config.self_id;
+        }
 
+        false
+    }
+
+    fn is_leader(&self) -> bool {
+        if let Some(leader_id) = self.leader_id {
+            return leader_id == self.config.self_id;
+        }
+
+        false
+    }
+
+    fn initialize_leader_hashmaps(&self, initial_value: usize) -> LeaderMap {
+        let hashmap: LeaderMap = self.config.servers.clone().into_iter().map(|x| (x, initial_value)).collect();
+
+        hashmap
+    }
+
+    // COnfiguration entry is one lement, but it's index is 0,
+    // therefore we have to decrement the value 
+    fn get_last_log_idx(&self) -> usize {
+        self.persistent_state.log.len().saturating_sub(1)
+    }
+
+    async fn become_a_leader(&mut self) {
+        self.leader_id = Some(self.config.self_id);
+        self.process_type = ProcessType::Leader;
+
+        self.next_index = self.initialize_leader_hashmaps(self.get_last_log_idx() + 1);
+        self.match_index = self.initialize_leader_hashmaps(0);
+
+        self.heartbeat_timer = Some(
+            self.self_ref
+                .as_ref()
+                .unwrap()
+                .request_tick(HeartbeatTick, self.config.heartbeat_timeout)
+                .await,
+        );
+    }
+
+    async fn handle_request_response(&mut self, request_response: RequestVoteResponseArgs, header: RaftMessageHeader) {
+        if let ProcessType::Candidate { votes_received } = &mut self.process_type {
+            if let RequestVoteResponseArgs { vote_granted: true } = request_response {
+                votes_received.insert(header.source);
+            }
+
+            if votes_received.len() > (self.config.servers.len() / 2) {
+
+            }
+        }
     }
 }
 
@@ -232,7 +291,7 @@ impl Handler<RaftMessage> for Raft {
                 self.handle_request_vote(request_vote_args, header).await;
             },
             RaftMessageContent::RequestVoteResponse(request_vote_response) => {
-                self.handle_request_response(request_vote_response).await;
+                self.handle_request_response(request_vote_response, header).await;
             },
             RaftMessageContent::InstallSnapshot(InstallSnapshotArgs { last_included_index, last_included_term, last_config, client_sessions, offset, data, done }) => {
 
@@ -276,5 +335,11 @@ impl Handler<ClientRequest> for Raft {
 #[async_trait::async_trait]
 impl Handler<ElectionTimeout> for Raft {
     async fn handle(&mut self, _self_ref: &ModuleRef<Self>, _: ElectionTimeout) {
+    }
+}
+
+#[async_trait::async_trait]
+impl Handler<HeartbeatTick> for Raft {
+    async fn handle(&mut self, _self_ref: &ModuleRef<Self>, _: HeartbeatTick) {
     }
 }
