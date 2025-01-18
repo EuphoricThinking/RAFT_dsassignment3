@@ -428,7 +428,7 @@ impl Raft {
             self.send_append_entry_response(false, last_verified_log_index, source).await;
         }
         else {
-            // we have trejected the message with a smaller term
+            // we have rejected the message with a smaller term
             // now the term is at least as high as ours
             if self.persistent_state.current_term < term || self.is_candidate() {
                 self.convert_to_follower(term, Some(source)).await;
@@ -478,7 +478,7 @@ impl Raft {
             }
         }
 
-        unimplemented!()
+        // unimplemented!()
     }
 
     fn get_prev_idx_term(&self, follower_id: Uuid) -> (usize, u64) {
@@ -511,8 +511,21 @@ impl Raft {
         return RaftMessage { header: header, content: content };
     }
 
-    fn update_next_idx(&mut self, follower_id: Uuid, last_verified_idx: usize) {
+    fn update_next_idx_after_success(&mut self, follower_id: Uuid, last_verified_idx: usize) {
+        let last_log_idx = self.get_last_log_idx();
 
+        let next_idx = self.next_index.get_mut(&follower_id);
+
+        match next_idx {
+            None => {
+                let next_to_insert = min(self.get_last_log_idx(), last_verified_idx + 1);
+                self.next_index.insert(follower_id, next_to_insert);
+            },
+            Some(idx) => {
+                let next_to_insert = min(last_verified_idx + 1, last_log_idx);
+                *idx = next_to_insert;
+            }
+        }
     }
 
     async fn send_up_to_batch_size(&mut self, follower_id: Uuid) {
@@ -569,10 +582,19 @@ impl Raft {
             // send a batch
             // don't send multiple batches - network errors possible, reordering possible
             self.update_match_idx(source, last_verified_log_index);
+            self.update_next_idx_after_success(source, last_verified_log_index);
             self.send_up_to_batch_size(source).await;
+
+            // when to update match and next indices?
+            /*
+            success - the entries have been appended, therefore we can update the match index
+             */
         }
         else {
-
+            // check term for update
+            if self.persistent_state.current_term < term {
+                self.convert_to_follower(term, None).await;
+            }
         }
     }
 }
