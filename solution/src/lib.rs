@@ -141,13 +141,19 @@ impl Raft {
         self.update_storage().await;    
     }
 
-    async fn convert_to_follower(&mut self, current_term: u64) {
+    async fn update_term_if_newer(&mut self, new_term: u64) {
+        if self.persistent_state.current_term < new_term {
+            self.update_term(new_term).await;
+        }
+    }
+
+    async fn convert_to_follower(&mut self, current_term: u64, leader: Option<Uuid>) {
         self.update_term(current_term).await;
 
         self.persistent_state.voted_for = None;
         self.update_storage().await;
 
-        self.leader_id = None;
+        self.leader_id = leader;
         self.process_type = ProcessType::Follower;
     }
     
@@ -188,7 +194,7 @@ impl Raft {
                 // TODO check
                 if self.persistent_state.current_term < term {
                     // convert to a follower if a term is newer, grant a vote
-                    self.convert_to_follower(term).await;
+                    self.convert_to_follower(term, None).await;
                     self.update_candidate(source).await;
                     self.send_request_response(source, true).await;
                 }
@@ -346,19 +352,16 @@ impl Raft {
 
         let RaftMessageHeader{source, term} = header;
 
+        // we got a message from an older term
         if self.persistent_state.current_term > term {
-
+            self.send_append_entry_response(false, last_verified_log_index, source).await;
         }
-        match &mut self.process_type {
-            ProcessType::Candidate { votes_received } => {
-
-            },
-            ProcessType::Follower => {
-
-            },
-            ProcessType::Leader => {
-
-            },
+        else {
+            // we have trejected the message with a smaller term
+            // now the term is at least as high as ours
+            if self.persistent_state.current_term < term || self.is_candidate() {
+                self.convert_to_follower(term, Some(source)).await;
+            }
         }
     }
 }
