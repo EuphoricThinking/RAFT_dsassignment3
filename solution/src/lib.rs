@@ -452,6 +452,10 @@ impl Raft {
             }
         }
     }
+
+    async fn handle_append_entries_response(&mut self, append_entries_response: AppendEntriesResponseArgs, header: RaftMessageHeader) {
+        let AppendEntriesResponseArgs { success, last_verified_log_index } = append_entries_response;
+    }
 }
 
 #[async_trait::async_trait]
@@ -463,8 +467,8 @@ impl Handler<RaftMessage> for Raft {
             RaftMessageContent::AppendEntries(append_entries) => {
                 self.handle_append_entries(append_entries, header).await;
             },
-            RaftMessageContent::AppendEntriesResponse(AppendEntriesResponseArgs { success, last_verified_log_index }) => {
-
+            RaftMessageContent::AppendEntriesResponse(append_entry_response) => {
+                self.handle_append_entries_response(append_entry_response, header).await;
             },
             RaftMessageContent::RequestVote(request_vote_args) => {
                 self.handle_request_vote(request_vote_args, header).await;
