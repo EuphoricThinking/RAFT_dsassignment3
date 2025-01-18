@@ -550,6 +550,56 @@ impl Raft {
             self.sender.send(&follower_id, append_entry).await;
         }
     }
+
+    fn serialize_log(&self, log: &LogEntry) -> Vec<u8> {
+        let serialize_log = bincode::serialize(&log);
+        
+        match serialize_log {
+            Err(msg) => {
+                panic!("Panic induced by author - bincode error: {}", msg);
+            },
+            Ok(serialized) => {return serialized;},
+        }
+    }
+
+    async fn send_command_response_to_client(&mut self, log: LogEntry) {
+        let LogEntry { content, term, timestamp } = &log;
+        if let LogEntryContent::Command { data, client_id, sequence_num, lowest_sequence_num_without_response } = content {
+            let serialized_log = self.serialize_log(&log);
+            let content = CommandResponseContent::CommandApplied { output: serialized_log };
+            let args = CommandResponseArgs{
+                client_id: *client_id,
+                sequence_num: *sequence_num,
+                content: content,
+            };
+
+            let response = ClientRequestResponse::CommandResponse(args);
+            self.sender.send(client_id, response).await;
+        }
+
+    }
+
+    async fn commit_entries_send_to_client(&mut self) {
+        while self.commit_index > self.last_applied {
+            self.last_applied += 1;
+            let log_to_be_committed = self.persistent_state.log[self.last_applied].clone();
+            self.apply_log_to_state_machine(log_to_be_committed).await;
+        }
+    }
+    async fn commit_and_send_current_entry_and_maybe_previous_if_majority_agrees(&mut self, last_verified_idx: usize) {
+        if last_verified_idx > self.commit_index {
+            // with new success - the majority might agree now
+            let agreed = self.match_index.values().filter(|&&x| x >= last_verified_idx).count();
+            if agreed > (self.config.servers.len() / 2) {
+                // the majority agrees
+                if self.persistent_state.current_term == self.persistent_state.log[last_verified_idx].term {
+                    // if the next entry to commit is from current term
+                    // commmit this entry and all previous
+                    self.commit_index = last_verified_idx;
+                }
+            }
+        }
+    }
     /*
     prev_log_index = 2
     entries.len() = 3
@@ -589,11 +639,17 @@ impl Raft {
             /*
             success - the entries have been appended, therefore we can update the match index
              */
+
+            // SUCCESS - check if possible to commit
+            // send to a client
         }
         else {
             // check term for update
             if self.persistent_state.current_term < term {
                 self.convert_to_follower(term, None).await;
+            }
+            else {
+                // we are still a leader
             }
         }
     }
