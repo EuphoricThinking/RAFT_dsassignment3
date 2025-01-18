@@ -1,4 +1,4 @@
-use std::{collections::HashMap, intrinsics::mir::PtrMetadata, time::SystemTime};
+use std::{collections::HashMap, time::SystemTime};
 
 use module_system::{Handler, ModuleRef, System, TimerHandle};
 use uuid::{timestamp::context, Uuid};
@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::future::Future;
 use tokio::time::Duration;
 use rand::{self, Rng};
+use std::cmp::min;
 
 pub use domain::*;
 
@@ -358,11 +359,45 @@ impl Raft {
         
         self.sender.send(&source, response).await;
     }
+    
+    fn are_logs_matching(&self, prev_log_index: usize, prev_log_term: u64) -> bool {
+        if self.get_last_log_idx() < prev_log_index {
+            return false;
+            // we have too few logs
+        }
+        else {
+            let queried_log = &self.persistent_state.log[prev_log_index];
+            let queried_term = queried_log.term;
+
+            return queried_term == prev_log_term;
+        }
+        // unimplemented!()
+    }
+
+    async fn clear_not_matching_logs(&mut self, last_prev_log_index: usize) {
+        if last_prev_log_index < self.get_last_log_idx() {
+            let next_not_matching = last_prev_log_index + 1;
+            self.persistent_state.log.drain(next_not_matching..);
+            self.update_storage().await;
+        }
+    }
+
+    async fn append_entries(&mut self, entries: &mut Vec<LogEntry>) {
+        self.persistent_state.log.append(entries);
+        self.update_storage().await;
+    }
+
+    // Assuming that the function is called after updating log entries
+    fn update_commmit_index(&mut self, leader_commit: usize) {
+        if leader_commit > self.commit_index {
+            self.commit_index = min(leader_commit, self.get_last_log_idx());
+        }
+    }
 
     async fn handle_append_entries(&mut self, append_entries: AppendEntriesArgs, header: RaftMessageHeader) {
         let last_verified_log_index = self.get_last_verified_log_index(&append_entries);
 
-        let AppendEntriesArgs { prev_log_index, prev_log_term, entries, leader_commit } = append_entries;
+        let AppendEntriesArgs { prev_log_index, prev_log_term, mut entries, leader_commit } = append_entries;
 
         let RaftMessageHeader{source, term} = header;
 
@@ -375,6 +410,21 @@ impl Raft {
             // now the term is at least as high as ours
             if self.persistent_state.current_term < term || self.is_candidate() {
                 self.convert_to_follower(term, Some(source)).await;
+            }
+
+            // process the request
+            if !self.are_logs_matching(prev_log_index, prev_log_term) {
+                self.send_append_entry_response(false, last_verified_log_index, source).await;
+            }
+            else {
+                /*
+                Iteratively, we have found the first matching log
+                since the leader decremented the last matching index
+                Therefore, if we have found the first matching log,
+                we can delete entires following the last matching log
+                 */
+                self.clear_not_matching_logs(prev_log_index).await;
+                self.append_entries(&mut entries).await;
             }
         }
     }
