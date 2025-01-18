@@ -575,12 +575,24 @@ impl Raft {
             sender.send(response).unwrap();
         }
     }
+
+    fn send_register_client_mock_response(&mut self) {
+        let content = RegisterClientResponseContent::ClientRegistered { client_id: Uuid::from_u128(self.last_applied as u128) };
+
+        let args = RegisterClientResponseArgs{
+            content: content,
+        };
+
+        let response = ClientRequestResponse::RegisterClientResponse(args);
+        self.get_sender_send_command(response);
+    }
+
     // fn send_response_to_client(&self, response: ClientRequestResponse, )
     async fn send_command_response_to_client(&mut self) {
         let log = &self.persistent_state.log[self.last_applied];
-        let LogEntry { content, term, timestamp } = &log;
+        let LogEntry { content, term, timestamp } = log.clone();
 
-        if let LogEntryContent::Command { data, client_id, sequence_num, lowest_sequence_num_without_response } = content {
+        if let LogEntryContent::Command { data, client_id, sequence_num, lowest_sequence_num_without_response } = &content {
             let applied_output = self.state_machine.apply(data).await;
             let content = CommandResponseContent::CommandApplied { output: applied_output };
             let args = CommandResponseArgs{
@@ -593,7 +605,9 @@ impl Raft {
             self.get_sender_send_command(response);
         }
 
-        
+        if let LogEntryContent::RegisterClient = &content {
+            self.send_register_client_mock_response();
+        }
 
     }
 
@@ -604,6 +618,7 @@ impl Raft {
             self.apply_log_to_state_machine(log_to_be_committed).await;
         }
     }
+
     async fn commit_and_send_current_entry_and_maybe_previous_if_majority_agrees(&mut self, last_verified_idx: usize) {
         if last_verified_idx > self.commit_index {
             // with new success - the majority might agree now
