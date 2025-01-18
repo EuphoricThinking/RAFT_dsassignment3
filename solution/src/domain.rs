@@ -283,7 +283,7 @@ pub struct InstallSnapshotResponseArgs {
 }
 
 // State of a Raft process with a corresponding (volatile) information.
-#[derive(Default)]
+#[derive(Default, PartialEq)]
 pub enum ProcessType {
     #[default]
     Follower,

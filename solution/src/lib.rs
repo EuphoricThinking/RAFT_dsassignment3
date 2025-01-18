@@ -264,15 +264,25 @@ impl Raft {
         }
     }
 
-    fn get_empty_append_entry(&self) -> RaftMessageContent {
+    fn get_empty_append_entry(&self) -> RaftMessage{
+        let header = self.get_self_header();
         let args = AppendEntriesArgs{
             prev_log_index: self.get_last_log_idx(),
             prev_log_term: self.get_last_log_term(),
             entries: Vec::new(),
             leader_commit: self.commit_index,
         };
+        let content = RaftMessageContent::AppendEntries(args);
+     
+        return RaftMessage{
+            header: header,
+            content: content,
+        };
+    }
 
-        return RaftMessageContent::AppendEntries(args);
+    async fn broadcast_heartbeat(&self) {
+        let hearbeat = self.get_empty_append_entry();
+        self.broadcast(hearbeat).await;
     }
 
     async fn become_a_leader(&mut self) {
@@ -281,6 +291,9 @@ impl Raft {
 
         self.next_index = self.initialize_leader_hashmaps(self.get_last_log_idx() + 1);
         self.match_index = self.initialize_leader_hashmaps(0);
+
+        // In LA1, the first tick should be sent after the interval elapses
+        self.broadcast_heartbeat();
 
         self.heartbeat_timer = Some(
             self.self_ref
@@ -370,5 +383,11 @@ impl Handler<ElectionTimeout> for Raft {
 #[async_trait::async_trait]
 impl Handler<HeartbeatTick> for Raft {
     async fn handle(&mut self, _self_ref: &ModuleRef<Self>, _: HeartbeatTick) {
+        if self.process_type == ProcessType::Leader {
+            self.broadcast_heartbeat().await;
+        }
+        else if let Some(handle) = self.heartbeat_timer.take() {
+            handle.stop().await;
+        }
     }
 }
