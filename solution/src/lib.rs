@@ -482,19 +482,37 @@ impl Raft {
     }
 
     fn get_prev_idx_term(&self, follower_id: Uuid) -> (usize, u64) {
-        let next_idx = 
-        unimplemented!()
+        let next_idx_res = self.next_index.get(&follower_id);
+
+        match next_idx_res {
+            None => return (0, 0),
+            Some(next_idx) => {
+                // next_log is the log we are going to send
+                // -1 is the log before the logs we are going to send
+                let prev_idx = (*next_idx).saturating_sub(1);
+                let prev_log = &self.persistent_state.log[prev_idx];
+                return (*next_idx, prev_log.term);
+            }
+        }
+        // unimplemented!()
     }
 
-    fn get_append_entry(&self, entries: Vec<LogEntry>, follower_id: Uuid) {
+    fn get_append_entry(&self, entries: Vec<LogEntry>, follower_id: Uuid) -> RaftMessage{
         let header = self.get_self_header();
-        let (match_idx, match_term) = self.get_last_matching_idx_data(follower_id);
+        let (prev_idx, prev_term) = self.get_prev_idx_term(follower_id);
         let args = AppendEntriesArgs{
-            prev_log_index: match_idx,
-            prev_log_term: match_term,
+            prev_log_index: prev_idx,
+            prev_log_term: prev_term,
             entries: entries,
-            leader_commit: self.
-        }
+            leader_commit: self.commit_index,
+        };
+        let content = RaftMessageContent::AppendEntries(args);
+
+        return RaftMessage { header: header, content: content };
+    }
+
+    fn update_next_idx(&mut self, follower_id: Uuid, last_verified_idx: usize) {
+
     }
 
     async fn send_up_to_batch_size(&mut self, follower_id: Uuid) {
@@ -514,8 +532,9 @@ impl Raft {
             last idx in drain range is excluded
              */
             let entries_to_append = &self.persistent_state.log[start_range_first_idx_to_be_sent..end_range_first_idx_not_to_be_sent];
+            let append_entry = self.get_append_entry(entries_to_append.to_vec(), follower_id);
 
-
+            self.sender.send(&follower_id, append_entry).await;
         }
     }
     /*
@@ -549,6 +568,8 @@ impl Raft {
             // check the entries length
             // send a batch
             // don't send multiple batches - network errors possible, reordering possible
+            self.update_match_idx(source, last_verified_log_index);
+            self.send_up_to_batch_size(source).await;
         }
         else {
 
