@@ -449,12 +449,110 @@ impl Raft {
                 self.append_entries(&mut entries).await;
                 self.update_commmit_index(leader_commit);
                 self.commit_entries_according_to_commit_idx().await;
+
+                self.send_append_entry_response(true, last_verified_log_index, source).await;
             }
         }
     }
 
+    fn update_match_idx(&mut self, follower_id: Uuid, last_verified_idx: usize) {
+        let follower_val = self.match_index.get_mut(&follower_id);
+        match follower_val {
+            None => {
+                self.match_index.insert(follower_id, last_verified_idx);
+            },
+            Some(val) => {
+                *val = last_verified_idx;
+            }
+        }
+    }
+
+    fn get_last_matching_idx_data(&self, follower_id: Uuid) -> (usize, u64) {
+        let follower_data = self.match_index.get(&follower_id);
+        match follower_data {
+            None => {return (0, 0);},
+            Some(log_idx) => {
+                let term = self.persistent_state.log[*log_idx].term;
+
+                return (*log_idx, term);
+            }
+        }
+
+        unimplemented!()
+    }
+
+    fn get_prev_idx_term(&self, follower_id: Uuid) -> (usize, u64) {
+        let next_idx = 
+        unimplemented!()
+    }
+
+    fn get_append_entry(&self, entries: Vec<LogEntry>, follower_id: Uuid) {
+        let header = self.get_self_header();
+        let (match_idx, match_term) = self.get_last_matching_idx_data(follower_id);
+        let args = AppendEntriesArgs{
+            prev_log_index: match_idx,
+            prev_log_term: match_term,
+            entries: entries,
+            leader_commit: self.
+        }
+    }
+
+    async fn send_up_to_batch_size(&mut self, follower_id: Uuid) {
+        let match_res = self.match_index.get(&follower_id);
+
+        if let Some(match_idx) = match_res {
+            let num_logs_to_send = self.get_last_log_idx().saturating_sub(*match_idx);
+            let logs_per_batch = min(num_logs_to_send, self.config.append_entries_batch_size);
+            let end_range_first_idx_not_to_be_sent = logs_per_batch + match_idx;
+            let start_range_first_idx_to_be_sent = match_idx + 1;
+            /*
+            match_idx is already included
+            match_idx = 1
+            last_idx = 3
+            0 1 || 2 3
+            3 - 1 = 2 elements to be sent
+            last idx in drain range is excluded
+             */
+            let entries_to_append = &self.persistent_state.log[start_range_first_idx_to_be_sent..end_range_first_idx_not_to_be_sent];
+
+
+        }
+    }
+    /*
+    prev_log_index = 2
+    entries.len() = 3
+
+    0 1 2 || x x x
+    0 1 2 || 3 4 5
+    2 + 3 = 5
+    last_verified_log_index is the index of the last entry which is known to reside in the log
+
+    what if we decremented and send empty entries?
+    prev_log_index = 2
+    entries.len() = 0
+
+    0 1 2 ||
+    still the last available index
+    
+     */
     async fn handle_append_entries_response(&mut self, append_entries_response: AppendEntriesResponseArgs, header: RaftMessageHeader) {
         let AppendEntriesResponseArgs { success, last_verified_log_index } = append_entries_response;
+
+        let RaftMessageHeader { source, term } = header;
+
+        if success {
+            // last_verified_log_index = entries.len() + prev_index
+            // the full length of the follower log
+            // the index of the last common entry which is known to reside in the log
+            
+            // update matchIdx to last verified
+            // check the entries length
+            // send a batch
+            // don't send multiple batches - network errors possible, reordering possible
+        }
+        else {
+
+        }
     }
 }
 
