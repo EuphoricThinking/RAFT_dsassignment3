@@ -588,11 +588,11 @@ impl Raft {
     }
 
     // fn send_response_to_client(&self, response: ClientRequestResponse, )
-    async fn send_command_response_to_client(&mut self) {
+    async fn send_command_response_to_client_apply_to_state(&mut self) {
         let log = &self.persistent_state.log[self.last_applied];
         let LogEntry { content, term, timestamp } = log.clone();
 
-        if let LogEntryContent::Command { data, client_id, sequence_num, lowest_sequence_num_without_response } = &content {
+        if let LogEntryContent::Command { data, client_id, sequence_num, lowest_sequence_num_without_response: _ } = &content {
             let applied_output = self.state_machine.apply(data).await;
             let content = CommandResponseContent::CommandApplied { output: applied_output };
             let args = CommandResponseArgs{
@@ -614,8 +614,7 @@ impl Raft {
     async fn commit_entries_send_to_client(&mut self) {
         while self.commit_index > self.last_applied {
             self.last_applied += 1;
-            let log_to_be_committed = self.persistent_state.log[self.last_applied].clone();
-            self.apply_log_to_state_machine(log_to_be_committed).await;
+            self.send_command_response_to_client_apply_to_state().await;
         }
     }
 
@@ -629,6 +628,7 @@ impl Raft {
                     // if the next entry to commit is from current term
                     // commmit this entry and all previous
                     self.commit_index = last_verified_idx;
+                    self.commit_entries_send_to_client().await;
                 }
             }
         }
@@ -675,6 +675,7 @@ impl Raft {
 
             // SUCCESS - check if possible to commit
             // send to a client
+            self.commit_and_send_current_entry_and_maybe_previous_if_majority_agrees(last_verified_log_index).await;
         }
         else {
             // check term for update
