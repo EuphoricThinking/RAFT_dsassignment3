@@ -31,6 +31,8 @@ pub struct Raft {
     heartbeat_timer: Option<TimerHandle>,
     zero_log: LogEntry,
     commit_index: usize,
+    last_applied: usize,
+    state_machine: Box<dyn StateMachine>,
     
     // leader attributes
     next_index: LeaderMap,
@@ -387,6 +389,26 @@ impl Raft {
         self.update_storage().await;
     }
 
+    async fn apply_log_to_state_machine(&mut self, log: LogEntry) {
+        let serialized_res = bincode::serialize(&log);
+        match serialized_res {
+            Err(msg) => {
+                panic!("Panic induced by the author; bincode error: {}", msg);
+            }
+            Ok(serialized_log) => {
+                self.state_machine.apply(&serialized_log).await;
+            }
+        }
+    }
+
+    async fn commit_entries_according_to_commit_idx(&mut self) {
+        while self.commit_index > self.last_applied {
+            self.last_applied += 1;
+            let log_to_be_committed = self.persistent_state.log[self.last_applied].clone();
+            self.apply_log_to_state_machine(log_to_be_committed).await;
+        }
+    }
+
     // Assuming that the function is called after updating log entries
     fn update_commmit_index(&mut self, leader_commit: usize) {
         if leader_commit > self.commit_index {
@@ -425,6 +447,8 @@ impl Raft {
                  */
                 self.clear_not_matching_logs(prev_log_index).await;
                 self.append_entries(&mut entries).await;
+                self.update_commmit_index(leader_commit);
+                self.commit_entries_according_to_commit_idx().await;
             }
         }
     }
