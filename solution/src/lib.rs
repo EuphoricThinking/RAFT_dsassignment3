@@ -390,14 +390,18 @@ impl Raft {
     }
 
     async fn apply_log_to_state_machine(&mut self, log: LogEntry) {
-        let serialized_res = bincode::serialize(&log);
-        match serialized_res {
-            Err(msg) => {
-                panic!("Panic induced by the author; bincode error: {}", msg);
-            }
-            Ok(serialized_log) => {
-                self.state_machine.apply(&serialized_log).await;
-            }
+        // let serialized_res = bincode::serialize(&log);
+        // match serialized_res {
+        //     Err(msg) => {
+        //         panic!("Panic induced by the author; bincode error: {}", msg);
+        //     }
+        //     Ok(serialized_log) => {
+        //         self.state_machine.apply(&serialized_log).await;
+        //     }
+        // }
+        let LogEntry { content, term, timestamp } = log;
+        if let LogEntryContent::Command { data, client_id: _, sequence_num: _, lowest_sequence_num_without_response: _ } = content {
+            self.state_machine.apply(&data).await;
         }
     }
 
