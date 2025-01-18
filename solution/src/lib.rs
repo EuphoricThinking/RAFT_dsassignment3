@@ -5,6 +5,7 @@ use uuid::{timestamp::context, Uuid};
 use std::collections::HashSet;
 use std::future::Future;
 use tokio::time::Duration;
+use tokio::sync::mpsc::UnboundedSender;
 use rand::{self, Rng};
 use std::cmp::min;
 
@@ -33,6 +34,7 @@ pub struct Raft {
     commit_index: usize,
     last_applied: usize,
     state_machine: Box<dyn StateMachine>,
+    client_requests: HashMap<usize, UnboundedSender<ClientRequestResponse>>,
     
     // leader attributes
     next_index: LeaderMap,
@@ -399,7 +401,7 @@ impl Raft {
         //         self.state_machine.apply(&serialized_log).await;
         //     }
         // }
-        let LogEntry { content, term, timestamp } = log;
+        let LogEntry { content, term: _, timestamp: _ } = log;
         if let LogEntryContent::Command { data, client_id: _, sequence_num: _, lowest_sequence_num_without_response: _ } = content {
             self.state_machine.apply(&data).await;
         }
@@ -566,11 +568,21 @@ impl Raft {
         }
     }
 
-    async fn send_command_response_to_client(&mut self, log: LogEntry) {
+    fn get_sender_send_command(&mut self, response: ClientRequestResponse) {
+        let sender_res= self.client_requests.remove(&self.last_applied);
+
+        if let Some(sender) = sender_res {
+            sender.send(response).unwrap();
+        }
+    }
+    // fn send_response_to_client(&self, response: ClientRequestResponse, )
+    async fn send_command_response_to_client(&mut self) {
+        let log = &self.persistent_state.log[self.last_applied];
         let LogEntry { content, term, timestamp } = &log;
+
         if let LogEntryContent::Command { data, client_id, sequence_num, lowest_sequence_num_without_response } = content {
-            let serialized_log = self.serialize_log(&log);
-            let content = CommandResponseContent::CommandApplied { output: serialized_log };
+            let applied_output = self.state_machine.apply(data).await;
+            let content = CommandResponseContent::CommandApplied { output: applied_output };
             let args = CommandResponseArgs{
                 client_id: *client_id,
                 sequence_num: *sequence_num,
@@ -578,8 +590,10 @@ impl Raft {
             };
 
             let response = ClientRequestResponse::CommandResponse(args);
-            self.sender.send(client_id, response).await;
+            self.get_sender_send_command(response);
         }
+
+        
 
     }
 
