@@ -1,7 +1,7 @@
 use std::{collections::HashMap, intrinsics::mir::PtrMetadata, time::SystemTime};
 
 use module_system::{Handler, ModuleRef, System, TimerHandle};
-use uuid::Uuid;
+use uuid::{timestamp::context, Uuid};
 use std::collections::HashSet;
 use std::future::Future;
 use tokio::time::Duration;
@@ -291,11 +291,26 @@ impl Raft {
         self.broadcast(hearbeat).await;
     }
 
+    fn get_log_entry(&self, content: LogEntryContent) -> LogEntry {
+        LogEntry{
+            content: content,
+            term: self.persistent_state.current_term,
+            timestamp: SystemTime::now(),
+        }
+        // unimplemented!()
+    }
+    async fn push_nop_to_log(&mut self) {
+        let nop_entry = self.get_log_entry(LogEntryContent::NoOp);
+        self.persistent_state.log.push(nop_entry);
+        self.update_storage().await;
+    }
+
     async fn become_a_leader(&mut self) {
         self.leader_id = Some(self.config.self_id);
         self.process_type = ProcessType::Leader;
 
-        self.next_index = self.initialize_leader_hashmaps(self.get_last_log_idx() + 1);
+        self.push_nop_to_log().await;
+        self.next_index = self.initialize_leader_hashmaps(self.get_last_log_idx()); // without +1, since nextIdx should be initialized with nop idx
         self.match_index = self.initialize_leader_hashmaps(0);
 
         // In LA1, the first tick should be sent after the interval elapses
