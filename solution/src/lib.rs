@@ -29,6 +29,7 @@ pub struct Raft {
     self_ref: Option<ModuleRef<Self>>,
     heartbeat_timer: Option<TimerHandle>,
     zero_log: LogEntry,
+    commit_index: usize,
     
     // leader attributes
     next_index: LeaderMap,
@@ -266,8 +267,12 @@ impl Raft {
     fn get_empty_append_entry(&self) -> RaftMessageContent {
         let args = AppendEntriesArgs{
             prev_log_index: self.get_last_log_idx(),
-            prev_log_term: 
+            prev_log_term: self.get_last_log_term(),
+            entries: Vec::new(),
+            leader_commit: self.commit_index,
         };
+
+        return RaftMessageContent::AppendEntries(args);
     }
 
     async fn become_a_leader(&mut self) {
