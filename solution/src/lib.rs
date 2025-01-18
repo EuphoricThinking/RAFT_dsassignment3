@@ -707,11 +707,11 @@ impl Handler<RaftMessage> for Raft {
             RaftMessageContent::RequestVoteResponse(request_vote_response) => {
                 self.handle_request_response(request_vote_response, header).await;
             },
-            RaftMessageContent::InstallSnapshot(InstallSnapshotArgs { last_included_index, last_included_term, last_config, client_sessions, offset, data, done }) => {
-
+            RaftMessageContent::InstallSnapshot(_) => {
+                unimplemented!("Snapshots omitted");
             },
-            RaftMessageContent::InstallSnapshotResponse(InstallSnapshotResponseArgs { last_included_index, offset }) => {
-
+            RaftMessageContent::InstallSnapshotResponse(_) => {
+                unimplemented!("Snapshots omitted")
             },
         }
         todo!()
@@ -728,13 +728,13 @@ impl Handler<ClientRequest> for Raft {
 
             },
             ClientRequestContent::Snapshot => {
-
+                unimplemented!("Snapshots omitted");
             },
             ClientRequestContent::AddServer { new_server } => {
-
+                unimplemented!("Cluster membership changes omitted");
             },
             ClientRequestContent::RemoveServer { old_server } => {
-
+                unimplemented!("Cluster membership changes omitted");
             },
             ClientRequestContent::RegisterClient => {
 
