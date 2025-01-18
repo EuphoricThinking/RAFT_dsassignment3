@@ -28,6 +28,7 @@ pub struct Raft {
     election_timer: Option<TimerHandle>,
     self_ref: Option<ModuleRef<Self>>,
     heartbeat_timer: Option<TimerHandle>,
+    zero_log: LogEntry,
     
     // leader attributes
     next_index: LeaderMap,
@@ -69,26 +70,26 @@ impl Raft {
         header
     }
 
-    fn get_last_log_and_idx(&self) -> (Option<&LogEntry>, usize)  {
+    fn get_last_log_and_idx(&self) -> (u64, usize)  {
         // return (self.persistent_state.log.last(), self.persistent_state.log.len());
-        return (self.persistent_state.log.last(), self.get_last_log_idx());
+        return (self.get_last_log_term(), self.get_last_log_idx());
     }
 
     fn is_other_log_at_least_as_up_to_date_as_self(&self, last_log_index: usize, last_log_term: u64) -> bool {
         // let self_last_log_idx
-        let (self_log, self_idx) = self.get_last_log_and_idx();
+        let (self_term, self_idx) = self.get_last_log_and_idx();
 
-        match self_log {
-            // idx zero for empty log
-            None =>  {
-            // the sent log has either no elements (as our log),
-            // thus it is as up-to-date as ours
-            // or can have any entry, which is more up-to-date as ours
-                return true;
-            },
+        // match self_log {
+        //     // idx zero for empty log
+        //     None =>  {
+        //     // the sent log has either no elements (as our log),
+        //     // thus it is as up-to-date as ours
+        //     // or can have any entry, which is more up-to-date as ours
+        //         return true;
+        //     },
 
-            Some(log) => {
-                let self_term = log.term;
+        //     Some(log) => {
+                // let self_term = log.term;
                 
                 if last_log_term > self_term {
                     // our term is older
@@ -97,8 +98,8 @@ impl Raft {
                 else { 
                     return (self_term == last_log_term) && (self_idx <= last_log_index);
                 }
-            }
-        }
+        //     }
+        // }
     } 
 
     async fn send_request_response(&self, source: Uuid, vote: bool) {
@@ -215,7 +216,7 @@ impl Raft {
                 //     // }
             
                 // },
-            }
+        }
     }
 
     fn is_candidate(&self) -> bool {
@@ -244,6 +245,29 @@ impl Raft {
     // therefore we have to decrement the value 
     fn get_last_log_idx(&self) -> usize {
         self.persistent_state.log.len().saturating_sub(1)
+    }
+
+    fn get_last_log_entry(&self) -> &LogEntry {
+        let last_log = self.persistent_state.log.last();
+        match last_log {
+            None => &self.zero_log,
+            Some(log) => log,
+        }
+    }
+
+    fn get_last_log_term(&self) -> u64 {
+        let last_log = self.persistent_state.log.last();
+        match last_log {
+            None => self.zero_log.term,
+            Some(log) => log.term,
+        }
+    }
+
+    fn get_empty_append_entry(&self) -> RaftMessageContent {
+        let args = AppendEntriesArgs{
+            prev_log_index: self.get_last_log_idx(),
+            prev_log_term: 
+        };
     }
 
     async fn become_a_leader(&mut self) {
