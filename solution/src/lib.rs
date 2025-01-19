@@ -41,6 +41,7 @@ pub struct Raft {
     // leader attributes
     next_index: LeaderMap,
     match_index: LeaderMap,
+    heartbeat_response: HashSet<Uuid>,
 }
 
 impl Raft {
@@ -82,6 +83,7 @@ impl Raft {
                 // leader attributes
                 next_index: HashMap::new(),
                 match_index: HashMap::new(),
+                heartbeat_response: HashSet::new(),
             })
             .await;
         self_ref.send(Init).await;
@@ -445,15 +447,17 @@ impl Raft {
 
         // In LA1, the first tick should be sent after the interval elapses
         // self.broadcast_heartbeat().await;
-        if let Some(handle) = self.election_timer.take() {
-            handle.stop().await;
-        }
+        // if let Some(handle) = self.election_timer.take() {
+        //     handle.stop().await;
+        // }
 
+        self.heartbeat_response = HashSet::new();
         self.next_index = self.initialize_leader_hashmaps(self.get_last_log_idx() + 1); // +1 will be nop
         self.match_index = self.initialize_leader_hashmaps(0);
         self.push_nop_to_log().await;
 
-        self.broadcast_nop().await;
+        // self.broadcast_nop().await;
+        self.broadcast_heartbeat().await;
 
         self.heartbeat_timer = Some(
             self.self_ref
@@ -845,6 +849,8 @@ impl Raft {
             self.convert_to_follower(term, None).await;
         }
         else {
+            self.heartbeat_response.insert(source);
+
             if success {
                 // last_verified_log_index = entries.len() + prev_index
                 // the full length of the follower log
@@ -863,6 +869,8 @@ impl Raft {
 
                 if last_verified_log_index != self.get_last_log_idx() {
                     // println!("last_verified is not batch");
+                    // all logs are replicated on the given server
+                    // for heartbeat - it would eventually send empty messages
                     self.send_up_to_batch_size(source).await;
                 }
 
@@ -1075,6 +1083,12 @@ impl Handler<ElectionTimeout> for Raft {
             ProcessType::Leader => {
                 // not affected - skip
                 println!("timoeuted leaer");
+                if self.heartbeat_response.len() < (self.config.servers.len() / 2) {
+                    self.convert_to_follower(self.persistent_state.current_term, None).await;
+                }
+                else {
+                    self.heartbeat_response.clear();
+                }
             }
         }
     }
