@@ -302,6 +302,11 @@ impl Raft {
     async fn push_to_log(&mut self, log: LogEntry) {
         self.persistent_state.log.push(log);
         self.update_storage().await;
+
+        if self.process_type == ProcessType::Leader {
+            self.match_index.insert(self.config.self_id, self.get_last_log_idx());
+            self.next_index.insert(self.config.self_id, self.get_last_log_idx() + 1);
+        }
     }
 
     async fn push_nop_to_log(&mut self) {
@@ -725,7 +730,7 @@ impl Raft {
         self.push_to_log(log_entry).await;
     }
 
-    async fn send_log_to_ready_followers(&mut self) {
+    async fn send_already_added_new_log_to_ready_followers(&mut self) {
         let last_log = self.get_last_log_entry();
 
         for follower_id in &self.config.servers {
@@ -749,14 +754,41 @@ impl Raft {
             }
         }
     }
-    async fn handle_client_command_request(&mut self, command: ClientRequestContent, reply_to: UnboundedSender<ClientRequestResponse>) {
-        if self.process_type == ProcessType::Leader {
-            self.add_client_command_to_log(command).await;
-            let command_idx = self.get_last_log_idx();
-            self.client_requests.insert(command_idx, reply_to); // TODO check log update? no, might be overwritten if the leader changes, but it's a volatile state so it wouldn't be saved
+
+    fn decline_client_command_send_leader_id(&self, content: ClientRequestContent, reply_to: UnboundedSender<ClientRequestResponse>) {
+            if let ClientRequestContent::Command { command, client_id, sequence_num, lowest_sequence_num_without_response } = &content {
+                let response_content = CommandResponseContent::NotLeader { leader_hint: self.leader_id };
+                let args = CommandResponseArgs{
+                    client_id: *client_id, sequence_num: *sequence_num, content: response_content};
+                let response = ClientRequestResponse::CommandResponse(args);
+                reply_to.send(response).unwrap();
+            }
+
+            if let ClientRequestContent::RegisterClient = &content {
+                let response_content = RegisterClientResponseContent::NotLeader { leader_hint: self.leader_id };
+                let args = RegisterClientResponseArgs{
+                    content: response_content,
+                };
+                let response = ClientRequestResponse::RegisterClientResponse(args);
+                reply_to.send(response).unwrap();
+            }
         }
 
-    }
+
+
+    async fn handle_client_command_request(&mut self, command: ClientRequestContent, reply_to: UnboundedSender<ClientRequestResponse>) {
+            if self.process_type == ProcessType::Leader {
+                self.add_client_command_to_log(command).await;
+
+                let command_idx = self.get_last_log_idx();
+                self.client_requests.insert(command_idx, reply_to); // TODO check log update? no, might be overwritten if the leader changes, but it's a volatile state so it wouldn't be saved
+                self.send_already_added_new_log_to_ready_followers().await;
+            }
+            else {
+                // inform that you are not a leader, send leader id
+                self.decline_client_command_send_leader_id(command, reply_to);
+            }
+        }
 }
 
 #[async_trait::async_trait]
@@ -794,20 +826,20 @@ impl Handler<ClientRequest> for Raft {
         let ClientRequest { reply_to, content } = msg;
 
         match &content {
-            ClientRequestContent::Command { command, client_id, sequence_num, lowest_sequence_num_without_response } => {
-
+            ClientRequestContent::Command { command: _, client_id: _, sequence_num: _, lowest_sequence_num_without_response: _ } => {
+                self.handle_client_command_request(content, reply_to).await;
             },
             ClientRequestContent::Snapshot => {
                 unimplemented!("Snapshots omitted");
             },
-            ClientRequestContent::AddServer { new_server } => {
+            ClientRequestContent::AddServer { new_server: _ } => {
                 unimplemented!("Cluster membership changes omitted");
             },
-            ClientRequestContent::RemoveServer { old_server } => {
+            ClientRequestContent::RemoveServer { old_server: _ } => {
                 unimplemented!("Cluster membership changes omitted");
             },
             ClientRequestContent::RegisterClient => {
-
+                self.handle_client_command_request(content, reply_to).await;
             },
         }
         todo!()
