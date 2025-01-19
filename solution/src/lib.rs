@@ -140,7 +140,7 @@ impl Raft {
         let serialized_storage = bincode::serialize(&self.persistent_state);
         match serialized_storage {
             Err(_) => {
-                panic!("Intended panic: erialize storage error");
+                panic!("Intended panic: serialize storage error");
             },
             Ok(res) => {
                 let storage_res = self.storage.put(&self.config.self_id.to_string(), &res).await;
@@ -172,7 +172,7 @@ impl Raft {
                 let deserialize_res: Result<PersistentState, Error> = bincode::deserialize(&restored);
                 match deserialize_res {
                     Err(msg) => {
-                        panic!("Intended panic: bincode desrialization error in persistent state retrieval: {}", msg);
+                        panic!("Intended panic: bincode deserialization error in persistent state retrieval: {}", msg);
                     },
                     Ok(state) =>
                         return state,
@@ -283,14 +283,6 @@ impl Raft {
     fn get_last_log_idx(&self) -> usize {
         self.persistent_state.log.len().saturating_sub(1)
     }
-
-    // fn get_last_log_entry(&self) -> &LogEntry {
-    //     let last_log = self.persistent_state.log.last();
-    //     match last_log {
-    //         None => &self.zero_log,
-    //         Some(log) => log,
-    //     }
-    // }
 
     fn get_last_log_term(&self) -> u64 {
         let last_log = self.persistent_state.log.last();
@@ -554,23 +546,12 @@ impl Raft {
         self.next_index.insert(follower_id, next_to_insert);
     }
 
-    fn update_decrement_next_idx(&mut self, follower_id: Uuid, ) { //last_verified_idx: usize) {
-        // let next_to_insert = last_verified_idx.saturating_sub(1);
+    fn update_decrement_next_idx(&mut self, follower_id: Uuid, ) { 
         let next_idx = self.next_index.get_mut(&follower_id);
 
         if let Some(idx) = next_idx {
             *idx = idx.saturating_sub(1);
         }
-
-        // match next_idx {
-        //     None => {
-        //         // this should not happen
-        //         self.next_index.insert(follower_id, next_to_insert);
-        //     },
-        //     Some(idx) => {
-        //         *idx = idx.saturating_sub(1);
-        //     }
-        // }
     }
 
     async fn send_up_to_batch_size(&mut self, follower_id: Uuid) {
@@ -728,10 +709,9 @@ impl Raft {
                 // SUCCESS - check if possible to commit
                 // send to a client
                 self.commit_and_send_current_entry_and_maybe_previous_if_majority_agrees(last_verified_log_index).await;
-                // }
             }
             else {
-                    self.update_decrement_next_idx(source); //, last_verified_log_index);
+                    self.update_decrement_next_idx(source); 
                     let empty_entry = self.get_empty_append_entry(source);
                     self.sender.send(&source, empty_entry).await;
             }
@@ -751,30 +731,22 @@ impl Raft {
     }
 
     async fn send_already_added_new_log_to_ready_followers(&mut self) {
-        // let last_log = self.get_last_log_entry();
         let servers = self.config.servers.clone();
 
-        for follower_id in servers { //&self.config.servers {
+        for follower_id in servers { 
             if follower_id != self.config.self_id {
-                // let next_idx_res = self.next_index.get(follower_id);
-                // if let Some(next_idx) = next_idx_res {
-                //     if *next_idx == self.get_last_log_idx() {
-                    if self.is_next_idx_next_after_match_idx(follower_id) {
-                        // the follower is up to date
-                        self.send_up_to_batch_size(follower_id).await;
-                        // let wrapped_entry = vec![last_log.clone()];
-                        // let entry_to_send = self.get_append_entry(wrapped_entry, *follower_id);
-                        // self.sender.send(follower_id, entry_to_send).await;
-                    }
-                    else {
-                        /*
-                        When a leader has log entries to send to a follower, it should send AppendEntries immediately (rather than send AppendEntries only on heartbeat timeouts).
+                if self.is_next_idx_next_after_match_idx(follower_id) {
+                    self.send_up_to_batch_size(follower_id).await;
+                }
+                else {
+                    /*
+                    When a leader has log entries to send to a follower, it should send AppendEntries immediately (rather than send AppendEntries only on heartbeat timeouts).
 
-                        I understand that we should always send AppendEntry when there is a new log, even if nextIdx != matchIdx + 1
-                        */
-                        let empty_entry = self.get_empty_append_entry(follower_id);
-                        self.sender.send(&follower_id, empty_entry).await;
-                    }
+                    I understand that we should always send AppendEntry when there is a new log, even if nextIdx != matchIdx + 1
+                    */
+                    let empty_entry = self.get_empty_append_entry(follower_id);
+                    self.sender.send(&follower_id, empty_entry).await;
+                }
                 
             }
         }
