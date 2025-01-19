@@ -297,9 +297,11 @@ pub async fn register_client(
             content: ClientRequestContent::RegisterClient,
         })
         .await;
+    let res = result_receiver.recv().await.unwrap();
+    println!("res request: {:?}", res);
     if let ClientRequestResponse::RegisterClientResponse(RegisterClientResponseArgs {
         content: RegisterClientResponseContent::ClientRegistered { client_id },
-    }) = result_receiver.recv().await.unwrap()
+    }) = res //result_receiver.recv().await.unwrap()
     {
         client_id
     } else {

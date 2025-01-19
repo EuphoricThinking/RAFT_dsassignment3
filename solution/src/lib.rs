@@ -261,12 +261,12 @@ impl Raft {
         let RequestVoteArgs { last_log_index, last_log_term } = request_vote;
         let RaftMessageHeader { source, term } = request_header;
 
-        println!("requesting term {} {:?}", term, self.process_type);
+        // println!("requesting source {}   TO   {}", source, self.config.self_id);//term, self.process_type);
         // if our term is newer - reject the message
         // leader sets himself as a leader
         // if we are connected to the leader - reject
         if self.persistent_state.current_term > term || self.leader_id.is_some() {
-            println!("rejecting of leader: {:?}", self.leader_id);
+            // println!("rejecting of leader: {:?}", self.leader_id);
             self.send_request_response(source, false).await;
         }
         else {
@@ -287,8 +287,9 @@ impl Raft {
 
             if self.persistent_state.current_term < term {
                 // convert to a follower if a term is newer, grant a vote
+                // println!("followering");
                 self.convert_to_follower(term, None).await;
-                self.update_candidate(source).await;
+                // self.update_candidate(source).await;
             }
 
             if self.is_other_log_at_least_as_up_to_date_as_self(last_log_index, last_log_term) {
@@ -304,11 +305,13 @@ impl Raft {
                     // there is only self_term == term left
                     match self.persistent_state.voted_for {
                         None => {
+                            // println!("grant");
                             self.update_candidate(source).await;
                             self.send_request_response(source, true).await;
                         },
-                        Some(_) => {
+                        Some(_id) => {
                             // we have already voted
+                            // println!("we have already voted for? {}", _id);
                             self.send_request_response(source, false).await;
                         }
                     // }
@@ -437,9 +440,13 @@ impl Raft {
 
     async fn handle_request_response(&mut self, request_response: RequestVoteResponseArgs, header: RaftMessageHeader) {
         if let ProcessType::Candidate { votes_received } = &mut self.process_type {
+            // println!("got vote from {}   //TO// {} || {:?}", header.source, self.config.self_id, request_response);
+            // println!("set before {:?}", votes_received);
+
             if let RequestVoteResponseArgs { vote_granted: true } = request_response {
                 votes_received.insert(header.source);
             }
+            // println!("set after {:?}", votes_received);
 
             if votes_received.len() > (self.config.servers.len() / 2) {
                 self.become_a_leader().await;
@@ -535,7 +542,8 @@ impl Raft {
 
         let RaftMessageHeader{source, term} = header;
 
-        println!("msg term: {}", term);
+        // TODO here loops
+        // println!("msg term: {}", term);
         // we got a message from an older term
         if self.persistent_state.current_term > term {
             self.send_append_entry_response(false, last_verified_log_index, source).await;
@@ -544,7 +552,7 @@ impl Raft {
             // we have rejected the message with a smaller term
             // now the term is at least as high as ours
             if self.persistent_state.current_term < term || self.is_candidate() {
-                println!("converting {} -> {}", self.persistent_state.current_term, term);
+                // println!("converting {} -> {}", self.persistent_state.current_term, term);
                 self.convert_to_follower(term, Some(source)).await;
             }
             else {
@@ -738,6 +746,7 @@ impl Raft {
         }
 
         if let LogEntryContent::RegisterClient = &content {
+
             self.send_register_client_mock_response();
         }
 
@@ -889,17 +898,18 @@ impl Raft {
 
 
     async fn handle_client_command_request(&mut self, command: ClientRequestContent, reply_to: UnboundedSender<ClientRequestResponse>) {
-            if self.process_type == ProcessType::Leader {
+            // if self.process_type == ProcessType::Leader {
                 self.add_client_command_to_log(command).await;
 
                 let command_idx = self.get_last_log_idx();
                 self.client_requests.insert(command_idx, reply_to); // TODO check log update? no, might be overwritten if the leader changes, but it's a volatile state so it wouldn't be saved
                 self.send_already_added_new_log_to_ready_followers().await;
-            }
-            else {
-                // inform that you are not a leader, send leader id
-                self.decline_client_command_send_leader_id(command, reply_to);
-            }
+            // }
+            // else {
+            //     // inform that you are not a leader, send leader id
+                
+            //     self.decline_client_command_send_leader_id(command, reply_to);
+            // }
         }
 
     async fn broadcast_request_vote(&mut self) {
@@ -964,27 +974,35 @@ impl Handler<RaftMessage> for Raft {
 #[async_trait::async_trait]
 impl Handler<ClientRequest> for Raft {
     async fn handle(&mut self, _self_ref: &ModuleRef<Self>, msg: ClientRequest) {
-        let ClientRequest { reply_to, content } = msg;
-
-        match &content {
-            ClientRequestContent::Command { command: _, client_id: _, sequence_num: _, lowest_sequence_num_without_response: _ } => {
-                self.handle_client_command_request(content, reply_to).await;
-            },
-            ClientRequestContent::Snapshot => {
-                unimplemented!("Snapshots omitted");
-            },
-            ClientRequestContent::AddServer { new_server: _ } => {
-                unimplemented!("Cluster membership changes omitted");
-            },
-            ClientRequestContent::RemoveServer { old_server: _ } => {
-                unimplemented!("Cluster membership changes omitted");
-            },
-            ClientRequestContent::RegisterClient => {
-                self.handle_client_command_request(content, reply_to).await;
-            },
+            let ClientRequest { reply_to, content } = msg;
+            // println!("got client request: {:?}", self.process_type);
+            if self.process_type != ProcessType::Leader {
+                // inform that you are not a leader, send leader id
+                // println!("going to decline {}", self.config.self_id);
+                self.decline_client_command_send_leader_id(content, reply_to);
+            }
+            else {
+                // println!("not declining");
+                match &content {
+                    ClientRequestContent::Command { command: _, client_id: _, sequence_num: _, lowest_sequence_num_without_response: _ } => {
+                        self.handle_client_command_request(content, reply_to).await;
+                    },
+                    ClientRequestContent::Snapshot => {
+                        unimplemented!("Snapshots omitted");
+                    },
+                    ClientRequestContent::AddServer { new_server: _ } => {
+                        unimplemented!("Cluster membership changes omitted");
+                    },
+                    ClientRequestContent::RemoveServer { old_server: _ } => {
+                        unimplemented!("Cluster membership changes omitted");
+                    },
+                    ClientRequestContent::RegisterClient => {
+                        self.handle_client_command_request(content, reply_to).await;
+                    },
+                }
+            }
         }
         // todo!()
-    }
 }
 
 // TODO you can implement handlers of messages of other types for the Raft struct.
@@ -994,7 +1012,7 @@ impl Handler<ElectionTimeout> for Raft {
     async fn handle(&mut self, _self_ref: &ModuleRef<Self>, _: ElectionTimeout) {
         match &mut self.process_type  {
             ProcessType::Follower => {
-                println!("timeouted follower");
+                // println!("timeouted follower");
                 self.convert_to_a_candidate_start_election().await;
             },
             ProcessType::Candidate { votes_received } => {

@@ -399,6 +399,7 @@ async fn follower_redirects_to_leader() {
     // given
     let mut system = System::new().await;
     let leader_id = Uuid::new_v4();
+    println!("leader {}", leader_id);
     let follower_id = Uuid::new_v4();
     let processes = vec![leader_id, follower_id];
     let sender = ExecutorSender::default();
