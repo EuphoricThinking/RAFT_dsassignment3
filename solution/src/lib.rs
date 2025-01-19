@@ -317,8 +317,15 @@ impl Raft {
     }
 
     async fn become_a_leader(&mut self) {
+        self.leader_id = Some(self.config.self_id);
+        self.process_type = ProcessType::Leader;
+        
         // In LA1, the first tick should be sent after the interval elapses
         self.broadcast_heartbeat().await;
+        if let Some(handle) = self.election_timer.take() {
+            handle.stop().await;
+        }
+
         self.heartbeat_timer = Some(
             self.self_ref
                 .as_ref()
@@ -326,9 +333,6 @@ impl Raft {
                 .request_tick(HeartbeatTick, self.config.heartbeat_timeout)
                 .await,
         );
-
-        self.leader_id = Some(self.config.self_id);
-        self.process_type = ProcessType::Leader;
 
         self.push_nop_to_log().await;
         self.next_index = self.initialize_leader_hashmaps(self.get_last_log_idx()); // without +1, since nextIdx should be initialized with nop idx
@@ -447,7 +451,7 @@ impl Raft {
             }
 
             self.reset_election_timer().await;
-            
+
             // process the request
             if !self.are_logs_matching(prev_log_index, prev_log_term) {
                 self.send_append_entry_response(false, last_verified_log_index, source).await;
