@@ -1,11 +1,11 @@
-use std::{collections::HashMap, thread::JoinHandle, time::SystemTime};
+use std::{collections::HashMap, time::SystemTime};
 
 use bincode::Error;
 use module_system::{Handler, ModuleRef, System, TimerHandle};
-use uuid::{timestamp::context, Uuid};
+use uuid::Uuid;
 use std::collections::HashSet;
-use std::future::Future;
-use tokio::time::Duration;
+// use std::future::Future;
+// use tokio::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use rand::{self, Rng};
 use std::cmp::min;
@@ -201,7 +201,7 @@ impl Raft {
                 let deserialize_res: Result<PersistentState, Error> = bincode::deserialize(&restored);
                 match deserialize_res {
                     Err(msg) => {
-                        panic!("Intended panic: bincode desrialization error in persistent state retrieval");
+                        panic!("Intended panic: bincode desrialization error in persistent state retrieval: {}", msg);
                     },
                     Ok(state) =>
                         return state,
@@ -222,11 +222,11 @@ impl Raft {
         self.update_storage().await;    
     }
 
-    async fn update_term_if_newer(&mut self, new_term: u64) {
-        if self.persistent_state.current_term < new_term {
-            self.update_term(new_term).await;
-        }
-    }
+    // async fn update_term_if_newer(&mut self, new_term: u64) {
+    //     if self.persistent_state.current_term < new_term {
+    //         self.update_term(new_term).await;
+    //     }
+    // }
 
     async fn convert_to_follower(&mut self, current_term: u64, leader: Option<Uuid>) {
         self.update_term(current_term).await;
@@ -317,13 +317,13 @@ impl Raft {
         false
     }
 
-    fn is_leader(&self) -> bool {
-        if let Some(leader_id) = self.leader_id {
-            return leader_id == self.config.self_id;
-        }
+    // fn is_leader(&self) -> bool {
+    //     if let Some(leader_id) = self.leader_id {
+    //         return leader_id == self.config.self_id;
+    //     }
 
-        false
-    }
+    //     false
+    // }
 
     fn initialize_leader_hashmaps(&self, initial_value: usize) -> LeaderMap {
         let hashmap: LeaderMap = self.config.servers.clone().into_iter().map(|x| (x, initial_value)).collect();
@@ -568,19 +568,19 @@ impl Raft {
         // }
     }
 
-    fn get_last_matching_idx_data(&self, follower_id: Uuid) -> (usize, u64) {
-        let follower_data = self.match_index.get(&follower_id);
-        match follower_data {
-            None => {return (0, 0);},
-            Some(log_idx) => {
-                let term = self.persistent_state.log[*log_idx].term;
+    // fn get_last_matching_idx_data(&self, follower_id: Uuid) -> (usize, u64) {
+    //     let follower_data = self.match_index.get(&follower_id);
+    //     match follower_data {
+    //         None => {return (0, 0);},
+    //         Some(log_idx) => {
+    //             let term = self.persistent_state.log[*log_idx].term;
 
-                return (*log_idx, term);
-            }
-        }
+    //             return (*log_idx, term);
+    //         }
+    //     }
 
-        // unimplemented!()
-    }
+    //     // unimplemented!()
+    // }
 
     fn get_prev_idx_term(&self, follower_id: Uuid) -> (usize, u64) {
         let next_idx_res = self.next_index.get(&follower_id);
@@ -666,16 +666,16 @@ impl Raft {
         }
     }
 
-    fn serialize_log(&self, log: &LogEntry) -> Vec<u8> {
-        let serialize_log = bincode::serialize(&log);
+    // fn serialize_log(&self, log: &LogEntry) -> Vec<u8> {
+    //     let serialize_log = bincode::serialize(&log);
         
-        match serialize_log {
-            Err(msg) => {
-                panic!("Panic induced by author - bincode error: {}", msg);
-            },
-            Ok(serialized) => {return serialized;},
-        }
-    }
+    //     match serialize_log {
+    //         Err(msg) => {
+    //             panic!("Panic induced by author - bincode error: {}", msg);
+    //         },
+    //         Ok(serialized) => {return serialized;},
+    //     }
+    // }
 
     // After the crash - the sender might be missing
     fn get_sender_send_command(&mut self, response: ClientRequestResponse) {
@@ -700,15 +700,15 @@ impl Raft {
     // fn send_response_to_client(&self, response: ClientRequestResponse, )
     async fn send_command_response_to_client_apply_to_state(&mut self) {
         let log = &self.persistent_state.log[self.last_applied];
-        let LogEntry { content, term, timestamp } = log.clone();
+        let LogEntry { content, term: _, timestamp: _ } = log.clone();
 
         if let LogEntryContent::Command { data, client_id, sequence_num, lowest_sequence_num_without_response: _ } = &content {
             let applied_output = self.state_machine.apply(data).await;
-            let content = CommandResponseContent::CommandApplied { output: applied_output };
+            let response_content = CommandResponseContent::CommandApplied { output: applied_output };
             let args = CommandResponseArgs{
                 client_id: *client_id,
                 sequence_num: *sequence_num,
-                content: content,
+                content: response_content,
             };
 
             let response = ClientRequestResponse::CommandResponse(args);
@@ -846,7 +846,7 @@ impl Raft {
     }
 
     fn decline_client_command_send_leader_id(&self, content: ClientRequestContent, reply_to: UnboundedSender<ClientRequestResponse>) {
-            if let ClientRequestContent::Command { command, client_id, sequence_num, lowest_sequence_num_without_response } = &content {
+            if let ClientRequestContent::Command { command: _, client_id, sequence_num, lowest_sequence_num_without_response: _ } = &content {
                 let response_content = CommandResponseContent::NotLeader { leader_hint: self.leader_id };
                 let args = CommandResponseArgs{
                     client_id: *client_id, sequence_num: *sequence_num, content: response_content};
