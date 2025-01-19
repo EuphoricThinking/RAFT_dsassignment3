@@ -441,9 +441,9 @@ impl Raft {
             handle.stop().await;
         }
 
-        self.push_nop_to_log().await;
-        self.next_index = self.initialize_leader_hashmaps(self.get_last_log_idx()); // without +1, since nextIdx should be initialized with nop idx
+        self.next_index = self.initialize_leader_hashmaps(self.get_last_log_idx() + 1); // +1 will be nop
         self.match_index = self.initialize_leader_hashmaps(0);
+        self.push_nop_to_log().await;
 
         self.broadcast_nop().await;
 
@@ -556,11 +556,11 @@ impl Raft {
     async fn handle_append_entries(&mut self, append_entries: AppendEntriesArgs, header: RaftMessageHeader) {
         let last_verified_log_index = self.get_last_verified_log_index(&append_entries);
 
-        println!("{:?}", append_entries);
+        // println!("{:?}", append_entries);
 
         let AppendEntriesArgs { prev_log_index, prev_log_term, mut entries, leader_commit } = append_entries;
 
-        println!("last verified: {}", last_verified_log_index);
+        // println!("last verified: {}", last_verified_log_index);
 
         let RaftMessageHeader{source, term} = header;
 
@@ -723,7 +723,7 @@ impl Raft {
             let entries_to_append = &self.persistent_state.log[start_range_first_idx_to_be_sent..end_range_first_idx_not_to_be_sent];
             let append_entry = self.get_append_entry(entries_to_append.to_vec(), follower_id);
 
-            println!("last idx {} | match_idx: {} | entries to send: {:?}", self.get_last_log_idx(), *match_idx, append_entry);
+            // println!("last idx {} | match_idx: {} | entries to send: {:?}", self.get_last_log_idx(), *match_idx, append_entry);
 
             self.sender.send(&follower_id, append_entry).await;
         }
@@ -794,8 +794,11 @@ impl Raft {
 
     async fn commit_and_send_current_entry_and_maybe_previous_if_majority_agrees(&mut self, last_verified_idx: usize) {
         if last_verified_idx > self.commit_index {
+            println!("last verified: {} commit {} last log {} log {:?}\n", last_verified_idx, self.commit_index, self.get_last_log_idx(), self.persistent_state.log);
             // with new success - the majority might agree now
             let agreed = self.match_index.values().filter(|&&x| x >= last_verified_idx).count();
+            println!("agreed: {}", agreed);
+            println!("set: {:?}", self.match_index);
             if agreed > (self.config.servers.len() / 2) {
                 // the majority agrees
                 if self.persistent_state.current_term == self.persistent_state.log[last_verified_idx].term {
