@@ -298,10 +298,17 @@ impl Raft {
         }
         // unimplemented!()
     }
+
+    async fn push_to_log(&mut self, log: LogEntry) {
+        self.persistent_state.log.push(log);
+        self.update_storage().await;
+    }
+
     async fn push_nop_to_log(&mut self) {
         let nop_entry = self.get_log_entry(LogEntryContent::NoOp);
-        self.persistent_state.log.push(nop_entry);
-        self.update_storage().await;
+        // self.persistent_state.log.push(nop_entry);
+        // self.update_storage().await;
+        self.push_to_log(nop_entry).await;
     }
 
     async fn become_a_leader(&mut self) {
@@ -706,9 +713,31 @@ impl Raft {
     }
 
     // client commands
+    async fn add_client_command_to_log(&mut self, command: ClientRequestContent) {
+        let mut log_content = LogEntryContent::RegisterClient;
 
+        if let ClientRequestContent::Command { command, client_id, sequence_num, lowest_sequence_num_without_response } = &command {
+            log_content = LogEntryContent::Command { data: command.to_vec(), client_id: *client_id, sequence_num: *sequence_num, lowest_sequence_num_without_response: *lowest_sequence_num_without_response };
+        }
+
+        let log_entry = self.get_log_entry(log_content);
+        self.push_to_log(log_entry).await;
+    }
+
+    async fn send_log_to_ready_followers(&mut self) {
+        let last_log = self.get_last_log_entry();
+
+        for follower_id in &self.config.servers {
+            
+        }
+    }
     async fn handle_client_command_request(&mut self, command: ClientRequestContent, reply_to: UnboundedSender<ClientRequestResponse>) {
-        
+        if self.process_type == ProcessType::Leader {
+            self.add_client_command_to_log(command).await;
+            let command_idx = self.get_last_log_idx();
+            self.client_requests.insert(command_idx, reply_to); // TODO check log update? no, might be overwritten if the leader changes, but it's a volatile state so it wouldn't be saved
+        }
+
     }
 }
 
