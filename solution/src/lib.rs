@@ -54,6 +54,7 @@ impl Raft {
         stable_storage: Box<dyn StableStorage>,
         message_sender: Box<dyn RaftSender>,
     ) -> ModuleRef<Self> {
+        // println!("entering");
         let zero_log = Raft::get_zero_log(first_log_entry_timestamp, config.servers.clone());
         let restored_state = Raft::restore_state_storage(&stable_storage, config.self_id, zero_log.clone()).await;
 
@@ -84,6 +85,7 @@ impl Raft {
             })
             .await;
         self_ref.send(Init).await;
+        // println!("initialized");
         self_ref
 
         // todo!()
@@ -259,10 +261,12 @@ impl Raft {
         let RequestVoteArgs { last_log_index, last_log_term } = request_vote;
         let RaftMessageHeader { source, term } = request_header;
 
+        println!("requesting term {} {:?}", term, self.process_type);
         // if our term is newer - reject the message
         // leader sets himself as a leader
         // if we are connected to the leader - reject
         if self.persistent_state.current_term > term || self.leader_id.is_some() {
+            println!("rejecting of leader: {:?}", self.leader_id);
             self.send_request_response(source, false).await;
         }
         else {
@@ -273,15 +277,29 @@ impl Raft {
             // if log is at least as up-to-date as mine - grant vote, update your vote
             // match self.persistent_state.voted_for {
             //     None => {
+            // if self.persistent_state.current_term < term {
+            //     // convert to a follower if a term is newer, grant a vote
+            //     self.convert_to_follower(term, None).await;
+            //     self.update_candidate(source).await;
+            //     self.send_request_response(source, true).await;
+            // }
+                // else {
+
+            if self.persistent_state.current_term < term {
+                // convert to a follower if a term is newer, grant a vote
+                self.convert_to_follower(term, None).await;
+                self.update_candidate(source).await;
+            }
+
             if self.is_other_log_at_least_as_up_to_date_as_self(last_log_index, last_log_term) {
                 // TODO check
-                if self.persistent_state.current_term < term {
-                    // convert to a follower if a term is newer, grant a vote
-                    self.convert_to_follower(term, None).await;
-                    self.update_candidate(source).await;
-                    self.send_request_response(source, true).await;
-                }
-                else {
+                // if self.persistent_state.current_term < term {
+                //     // convert to a follower if a term is newer, grant a vote
+                //     self.convert_to_follower(term, None).await;
+                //     self.update_candidate(source).await;
+                //     self.send_request_response(source, true).await;
+                // }
+                // else {
                     // we have ruled out self_term > term and self_term < term,
                     // there is only self_term == term left
                     match self.persistent_state.voted_for {
@@ -293,7 +311,7 @@ impl Raft {
                             // we have already voted
                             self.send_request_response(source, false).await;
                         }
-                    }
+                    // }
                 }
             }
             else {
@@ -517,6 +535,7 @@ impl Raft {
 
         let RaftMessageHeader{source, term} = header;
 
+        println!("msg term: {}", term);
         // we got a message from an older term
         if self.persistent_state.current_term > term {
             self.send_append_entry_response(false, last_verified_log_index, source).await;
@@ -525,6 +544,7 @@ impl Raft {
             // we have rejected the message with a smaller term
             // now the term is at least as high as ours
             if self.persistent_state.current_term < term || self.is_candidate() {
+                println!("converting {} -> {}", self.persistent_state.current_term, term);
                 self.convert_to_follower(term, Some(source)).await;
             }
             else {
@@ -536,9 +556,11 @@ impl Raft {
 
             // process the request
             if !self.are_logs_matching(prev_log_index, prev_log_term) {
+                // println!("NOT matching");
                 self.send_append_entry_response(false, last_verified_log_index, source).await;
             }
             else {
+                // println!("Matching");
                 /*
                 Iteratively, we have found the first matching log
                 since the leader decremented the last matching index
@@ -903,6 +925,7 @@ impl Raft {
         self.process_type = ProcessType::Candidate { votes_received: votes_granted };
 
         self.update_candidate(self.config.self_id).await;
+        self.leader_id = None;
         self.reset_election_timer().await;
 
         self.broadcast_request_vote().await;
@@ -934,7 +957,7 @@ impl Handler<RaftMessage> for Raft {
                 unimplemented!("Snapshots omitted")
             },
         }
-        todo!()
+        // todo!()
     }
 }
 
@@ -960,7 +983,7 @@ impl Handler<ClientRequest> for Raft {
                 self.handle_client_command_request(content, reply_to).await;
             },
         }
-        todo!()
+        // todo!()
     }
 }
 
@@ -971,6 +994,7 @@ impl Handler<ElectionTimeout> for Raft {
     async fn handle(&mut self, _self_ref: &ModuleRef<Self>, _: ElectionTimeout) {
         match &mut self.process_type  {
             ProcessType::Follower => {
+                println!("timeouted follower");
                 self.convert_to_a_candidate_start_election().await;
             },
             ProcessType::Candidate { votes_received } => {
