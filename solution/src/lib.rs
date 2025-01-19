@@ -664,43 +664,43 @@ impl Raft {
 
         let RaftMessageHeader { source, term } = header;
 
-        if success {
-            // last_verified_log_index = entries.len() + prev_index
-            // the full length of the follower log
-            // the index of the last common entry which is known to reside in the log
-            
-            // update matchIdx to last verified
-            // check the entries length
-            // send a batch
-            // don't send multiple batches - network errors possible, reordering possible
-            // last_verified_log - last idx present in both server and a follower
-            // last_log_idx - idx of the last log in the server
-            // send messages only if the follower is behind the server
-            if last_verified_log_index != self.get_last_log_idx() {
-                self.update_match_idx(source, last_verified_log_index);
-                self.update_next_idx_after_success(source, last_verified_log_index);
-                self.send_up_to_batch_size(source).await;
-
-                // when to update match and next indices?
-                /*
-                success - the entries have been appended, therefore we can update the match index
-                */
-
-                // SUCCESS - check if possible to commit
-                // send to a client
-                self.commit_and_send_current_entry_and_maybe_previous_if_majority_agrees(last_verified_log_index).await;
-            }
+        // check term for update
+        if self.persistent_state.current_term < term {
+            self.convert_to_follower(term, None).await;
         }
         else {
-            // check term for update
-            if self.persistent_state.current_term < term {
-                self.convert_to_follower(term, None).await;
+            if success {
+                // last_verified_log_index = entries.len() + prev_index
+                // the full length of the follower log
+                // the index of the last common entry which is known to reside in the log
+                
+                // update matchIdx to last verified
+                // check the entries length
+                // send a batch
+                // don't send multiple batches - network errors possible, reordering possible
+                // last_verified_log - last idx present in both server and a follower
+                // last_log_idx - idx of the last log in the server
+                // send messages only if the follower is behind the server
+                if last_verified_log_index != self.get_last_log_idx() {
+                    self.update_match_idx(source, last_verified_log_index);
+                    self.update_next_idx_after_success(source, last_verified_log_index);
+                    self.send_up_to_batch_size(source).await;
+
+                    // when to update match and next indices?
+                    /*
+                    success - the entries have been appended, therefore we can update the match index
+                    */
+
+                    // SUCCESS - check if possible to commit
+                    // send to a client
+                    self.commit_and_send_current_entry_and_maybe_previous_if_majority_agrees(last_verified_log_index).await;
+                }
             }
             else {
-                // we are still a leader
-                self.update_decrement_next_idx(source, last_verified_log_index);
-                let empty_entry = self.get_empty_append_entry(source);
-                self.sender.send(&source, empty_entry).await;
+                    // we are still a leader
+                    self.update_decrement_next_idx(source, last_verified_log_index);
+                    let empty_entry = self.get_empty_append_entry(source);
+                    self.sender.send(&source, empty_entry).await;
             }
         }
     }
