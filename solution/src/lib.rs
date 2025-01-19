@@ -381,13 +381,21 @@ impl Raft {
         return self.get_append_entry(Vec::new(), follower_id);
     }
 
-    async fn broadcast_heartbeat(&self) {
+    async fn broadcast_heartbeat(&mut self) {
+        println!("broadcast heartbeat");
         // let hearbeat = self.get_empty_append_entry();
         // self.broadcast(hearbeat).await;
-        for follower_id in &self.config.servers {
-            if *follower_id != self.config.self_id {
-                let append_entry = self.get_empty_append_entry(*follower_id);
-                self.sender.send(follower_id, append_entry).await;
+        let servers = self.config.servers.clone();
+        // let self_id = self.config.self_id;
+        for follower_id in servers { //&self.config.servers {
+            if follower_id != self.config.self_id {
+                self.send_up_to_batch_size(follower_id).await; //self.get_empty_append_entry(*follower_id);
+
+                // let match_idx = self.match_index.get(follower_id).unwrap();
+                // let next_idx = self.next_index.get(follower_id).unwrap();
+                // println!("match {} next {} id {} last {}", match_idx, next_idx, follower_id, self.get_last_log_idx());
+                
+                // self.sender.send(follower_id, append_entry).await;
             }
         }
     }
@@ -436,7 +444,7 @@ impl Raft {
         self.process_type = ProcessType::Leader;
 
         // In LA1, the first tick should be sent after the interval elapses
-        self.broadcast_heartbeat().await;
+        // self.broadcast_heartbeat().await;
         if let Some(handle) = self.election_timer.take() {
             handle.stop().await;
         }
