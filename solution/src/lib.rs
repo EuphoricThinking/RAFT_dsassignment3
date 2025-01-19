@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::SystemTime};
+use std::{collections::HashMap, thread::JoinHandle, time::SystemTime};
 
 use bincode::Error;
 use module_system::{Handler, ModuleRef, System, TimerHandle};
@@ -9,6 +9,7 @@ use tokio::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use rand::{self, Rng};
 use std::cmp::min;
+// use tokio::task::JoinHandle;
 
 pub use domain::*;
 
@@ -102,9 +103,13 @@ impl Raft {
     async fn broadcast(&self, msg: RaftMessage) { 
         // TODO change to join_all?
         // let futures: Vec<Future> = Vec::new();
+        // let tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+
         for target in &self.config.servers {
             if *target != self.config.self_id {
                 self.sender.send(&target, msg.clone()).await;
+                // let cloned_sender = *(self.sender).clone();
+                // tasks.push(tokio::spawn(async move {cloned_sender.send(&target, msg.clone()).await;}))
             }
         }
     }
