@@ -202,6 +202,10 @@ impl Raft {
         self.process_type = ProcessType::Follower;
 
         self.reset_election_timer().await;
+
+        if let Some(handle) = self.heartbeat_timer.take() {
+            handle.stop().await;
+        }
     }
     
     async fn reset_election_timer(&mut self) {
@@ -280,13 +284,13 @@ impl Raft {
         self.persistent_state.log.len().saturating_sub(1)
     }
 
-    fn get_last_log_entry(&self) -> &LogEntry {
-        let last_log = self.persistent_state.log.last();
-        match last_log {
-            None => &self.zero_log,
-            Some(log) => log,
-        }
-    }
+    // fn get_last_log_entry(&self) -> &LogEntry {
+    //     let last_log = self.persistent_state.log.last();
+    //     match last_log {
+    //         None => &self.zero_log,
+    //         Some(log) => log,
+    //     }
+    // }
 
     fn get_last_log_term(&self) -> u64 {
         let last_log = self.persistent_state.log.last();
@@ -300,11 +304,31 @@ impl Raft {
         return self.get_append_entry(Vec::new(), follower_id);
     }
 
+    fn is_next_idx_next_after_match_idx(&self, follower_id: Uuid) -> bool {
+        let match_res = self.match_index.get(&follower_id);
+        if let Some(match_idx) = match_res {
+            let next_res = self.next_index.get(&follower_id);
+            if let Some(next_idx) = next_res {
+                if *next_idx == (*match_idx + 1) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     async fn broadcast_heartbeat(&mut self) {
         let servers = self.config.servers.clone();
         for follower_id in servers { 
             if follower_id != self.config.self_id {
-                self.send_up_to_batch_size(follower_id).await; 
+                if self.is_next_idx_next_after_match_idx(follower_id) {
+                    self.send_up_to_batch_size(follower_id).await; 
+                }
+                else {
+                    let empty_entry = self.get_empty_append_entry(follower_id);
+                    self.sender.send(&follower_id, empty_entry).await;
+                }
             }
         }
     }
@@ -343,6 +367,10 @@ impl Raft {
 
         // self.broadcast_nop().await;
         self.broadcast_heartbeat().await;
+
+        if let Some(handle) = self.heartbeat_timer.take() {
+            handle.stop().await;
+        }
 
         self.heartbeat_timer = Some(
             self.self_ref
@@ -532,6 +560,7 @@ impl Raft {
 
         match next_idx {
             None => {
+                // this should not happen
                 self.next_index.insert(follower_id, next_to_insert);
             },
             Some(idx) => {
@@ -556,7 +585,9 @@ impl Raft {
             3 - 1 = 2 elements to be sent
 
             match idx + 1 = 2 /// from the 2nd element, the first element to be sent
-            last idx in drain range is excluded
+            last idx in  range is excluded
+
+            [start..start] gives empty slice if up-to-date
              */
             let entries_to_append = &self.persistent_state.log[start_range_first_idx_to_be_sent..end_range_first_idx_not_to_be_sent];
             let append_entry = self.get_append_entry(entries_to_append.to_vec(), follower_id);
@@ -568,6 +599,7 @@ impl Raft {
 
 
     // After the crash - the sender might be missing
+    // we remove the sender for optimisation
     fn get_sender_send_command(&mut self, response: ClientRequestResponse) {
         let sender_res= self.client_requests.remove(&self.last_applied);
 
@@ -677,6 +709,8 @@ impl Raft {
                 self.update_match_idx(source, last_verified_log_index);
                 self.update_next_idx_after_success(source, last_verified_log_index);
 
+                // nextIdx should be matchIdx + 1
+                // we want to send messages if there are any left to be sent
                 if last_verified_log_index != self.get_last_log_idx() {
                     // all logs are replicated on the given server
                     // for heartbeat - it would eventually send empty messages
@@ -715,28 +749,31 @@ impl Raft {
     }
 
     async fn send_already_added_new_log_to_ready_followers(&mut self) {
-        let last_log = self.get_last_log_entry();
+        // let last_log = self.get_last_log_entry();
+        let servers = self.config.servers.clone();
 
-        for follower_id in &self.config.servers {
-            if *follower_id != self.config.self_id {
-                let next_idx_res = self.next_index.get(follower_id);
-                if let Some(next_idx) = next_idx_res {
-                    if *next_idx == self.get_last_log_idx() {
+        for follower_id in servers { //&self.config.servers {
+            if follower_id != self.config.self_id {
+                // let next_idx_res = self.next_index.get(follower_id);
+                // if let Some(next_idx) = next_idx_res {
+                //     if *next_idx == self.get_last_log_idx() {
+                    if self.is_next_idx_next_after_match_idx(follower_id) {
                         // the follower is up to date
-                        let wrapped_entry = vec![last_log.clone()];
-                        let entry_to_send = self.get_append_entry(wrapped_entry, *follower_id);
-                        self.sender.send(follower_id, entry_to_send).await;
+                        self.send_up_to_batch_size(follower_id).await;
+                        // let wrapped_entry = vec![last_log.clone()];
+                        // let entry_to_send = self.get_append_entry(wrapped_entry, *follower_id);
+                        // self.sender.send(follower_id, entry_to_send).await;
                     }
                     else {
                         /*
                         When a leader has log entries to send to a follower, it should send AppendEntries immediately (rather than send AppendEntries only on heartbeat timeouts).
 
-                        I understand that we should always send AppendEntry when there is a new log
+                        I understand that we should always send AppendEntry when there is a new log, even if nextIdx != matchIdx + 1
                         */
-                        let empty_entry = self.get_empty_append_entry(*follower_id);
-                        self.sender.send(follower_id, empty_entry).await;
+                        let empty_entry = self.get_empty_append_entry(follower_id);
+                        self.sender.send(&follower_id, empty_entry).await;
                     }
-                }
+                
             }
         }
     }
@@ -763,12 +800,18 @@ impl Raft {
 
 
     async fn handle_client_command_request(&mut self, command: ClientRequestContent, reply_to: UnboundedSender<ClientRequestResponse>) {
+        if self.process_type != ProcessType::Leader {
+            // inform that you are not a leader, send leader id
+            self.decline_client_command_send_leader_id(command, reply_to);
+        }
+        else {
             self.add_client_command_to_log(command).await;
 
             let command_idx = self.get_last_log_idx();
             self.client_requests.insert(command_idx, reply_to); 
             self.send_already_added_new_log_to_ready_followers().await;
         }
+    }
 
     async fn broadcast_request_vote(&mut self) {
         let (last_term, last_idx) = self.get_last_log_term_and_idx();
@@ -833,11 +876,8 @@ impl Handler<RaftMessage> for Raft {
 impl Handler<ClientRequest> for Raft {
     async fn handle(&mut self, _self_ref: &ModuleRef<Self>, msg: ClientRequest) {
             let ClientRequest { reply_to, content } = msg;
-            if self.process_type != ProcessType::Leader {
-                // inform that you are not a leader, send leader id
-                self.decline_client_command_send_leader_id(content, reply_to);
-            }
-            else {
+
+        
                 match &content {
                     ClientRequestContent::Command { command: _, client_id: _, sequence_num: _, lowest_sequence_num_without_response: _ } => {
                         self.handle_client_command_request(content, reply_to).await;
@@ -855,7 +895,7 @@ impl Handler<ClientRequest> for Raft {
                         self.handle_client_command_request(content, reply_to).await;
                     },
                 }
-            }
+            
         }
         // todo!()
 }
@@ -879,7 +919,6 @@ impl Handler<ElectionTimeout> for Raft {
                 }
             },
             ProcessType::Leader => {
-                // not affected - skip
                 if self.heartbeat_response.len() < (self.config.servers.len() / 2) {
                     self.convert_to_follower(self.persistent_state.current_term, None).await;
                 }
