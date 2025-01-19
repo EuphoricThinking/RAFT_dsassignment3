@@ -446,6 +446,8 @@ impl Raft {
                 self.convert_to_follower(term, Some(source)).await;
             }
 
+            self.reset_election_timer().await;
+            
             // process the request
             if !self.are_logs_matching(prev_log_index, prev_log_term) {
                 self.send_append_entry_response(false, last_verified_log_index, source).await;
