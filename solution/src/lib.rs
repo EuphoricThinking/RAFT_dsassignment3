@@ -275,20 +275,8 @@ impl Raft {
         }
     }
 
-    fn get_empty_append_entry(&self) -> RaftMessage{
-        let header = self.get_self_header();
-        let args = AppendEntriesArgs{
-            prev_log_index: self.get_last_log_idx(),
-            prev_log_term: self.get_last_log_term(),
-            entries: Vec::new(),
-            leader_commit: self.commit_index,
-        };
-        let content = RaftMessageContent::AppendEntries(args);
-     
-        return RaftMessage{
-            header: header,
-            content: content,
-        };
+    fn get_empty_append_entry(&self, follower_id: Uuid) -> RaftMessage{
+        return self.get_append_entry(Vec::new(), follower_id);
     }
 
     async fn broadcast_heartbeat(&self) {
@@ -296,7 +284,7 @@ impl Raft {
         // self.broadcast(hearbeat).await;
         for follower_id in &self.config.servers {
             if *follower_id != self.config.self_id {
-                let append_entry = self.get_append_entry(Vec::new(), *follower_id);
+                let append_entry = self.get_empty_append_entry(*follower_id);
                 self.sender.send(follower_id, append_entry).await;
             }
         }
