@@ -42,6 +42,8 @@ pub struct Raft {
     next_index: LeaderMap,
     match_index: LeaderMap,
     heartbeat_response: HashSet<Uuid>,
+
+    sessions: HashMap<Uuid, Session>,
 }
 
 impl Raft {
@@ -84,6 +86,7 @@ impl Raft {
                 next_index: HashMap::new(),
                 match_index: HashMap::new(),
                 heartbeat_response: HashSet::new(),
+                sessions: HashMap::new(),
             })
             .await;
         self_ref.send(Init).await;
@@ -533,6 +536,8 @@ impl Raft {
         self.persistent_state.log.append(entries);
         self.update_storage().await;
     }
+    
+    fn get_timestamp_difference(&self, timestamp: SystemTime)
 
     async fn apply_log_to_state_machine(&mut self, log: LogEntry) {
         // let serialized_res = bincode::serialize(&log);
@@ -544,9 +549,15 @@ impl Raft {
         //         self.state_machine.apply(&serialized_log).await;
         //     }
         // }
-        let LogEntry { content, term: _, timestamp: _ } = log;
-        if let LogEntryContent::Command { data, client_id: _, sequence_num: _, lowest_sequence_num_without_response: _ } = content {
+        
+        let LogEntry { content, term: _, timestamp: _timestamp } = log;
+        if let LogEntryContent::Command { data, client_id: _, sequence_num: _, lowest_sequence_num_without_response: _ } = &content {
             self.state_machine.apply(&data).await;
+        }
+
+        if let LogEntryContent::RegisterClient = &content {
+            let command_timestamp = SystemTime::now() - _timestamp;
+
         }
     }
 
@@ -761,14 +772,27 @@ impl Raft {
         }
     }
 
-    fn send_register_client_mock_response(&mut self) {
-        let content = RegisterClientResponseContent::ClientRegistered { client_id: Uuid::from_u128(self.last_applied as u128) };
+    fn get_empty_session(&self) -> Session {
+        let session = Session {
+            commands: HashMap::new(),
+            last_activity: SystemTime::now(),
+        };
+
+        session
+    }
+
+    fn send_register_client_response_allocate_session(&mut self) {
+        let client_id = Uuid::from_u128(self.last_applied as u128);
+        let content = RegisterClientResponseContent::ClientRegistered { client_id:  client_id};
 
         let args = RegisterClientResponseArgs{
             content: content,
         };
 
         let response = ClientRequestResponse::RegisterClientResponse(args);
+
+        self.sessions.insert(client_id, self.get_empty_session());
+
         self.get_sender_send_command(response);
     }
 
@@ -792,7 +816,7 @@ impl Raft {
 
         if let LogEntryContent::RegisterClient = &content {
 
-            self.send_register_client_mock_response();
+            self.send_register_client_response_allocate_session();
         }
 
     }

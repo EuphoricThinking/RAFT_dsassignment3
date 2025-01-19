@@ -315,3 +315,9 @@ pub struct HeartbeatTick;
 
 #[derive (Clone)]
 pub struct Init;
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct Session {
+    pub commands: HashMap<u64, Vec<u8>>, // sequenceNum, apply result
+    pub last_activity: SystemTime,
+}
