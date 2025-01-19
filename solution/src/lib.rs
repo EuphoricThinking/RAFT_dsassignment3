@@ -160,6 +160,8 @@ impl Raft {
 
         self.leader_id = leader;
         self.process_type = ProcessType::Follower;
+
+        self.reset_election_timer().await;
     }
     
     async fn reset_election_timer(&mut self) {
@@ -449,8 +451,12 @@ impl Raft {
             if self.persistent_state.current_term < term || self.is_candidate() {
                 self.convert_to_follower(term, Some(source)).await;
             }
+            else {
+                self.reset_election_timer().await;
+                // reset is issued additionally during conversion
+            }
 
-            self.reset_election_timer().await;
+            // self.reset_election_timer().await;
 
             // process the request
             if !self.are_logs_matching(prev_log_index, prev_log_term) {
@@ -859,6 +865,17 @@ impl Handler<ClientRequest> for Raft {
 #[async_trait::async_trait]
 impl Handler<ElectionTimeout> for Raft {
     async fn handle(&mut self, _self_ref: &ModuleRef<Self>, _: ElectionTimeout) {
+        match &mut self.process_type  {
+            ProcessType::Follower => {
+
+            },
+            ProcessType::Candidate { votes_received } => {
+
+            },
+            ProcessType::Leader => {
+                // not affected - skip
+            }
+        }
     }
 }
 
