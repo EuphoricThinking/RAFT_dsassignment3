@@ -306,7 +306,7 @@ impl Raft {
 
     async fn become_a_leader(&mut self) {
         // In LA1, the first tick should be sent after the interval elapses
-        self.broadcast_heartbeat();
+        self.broadcast_heartbeat().await;
         self.heartbeat_timer = Some(
             self.self_ref
                 .as_ref()
@@ -704,6 +704,12 @@ impl Raft {
             }
         }
     }
+
+    // client commands
+
+    async fn handle_client_command_request(&mut self, command: ClientRequestContent, reply_to: UnboundedSender<ClientRequestResponse>) {
+        
+    }
 }
 
 #[async_trait::async_trait]
@@ -740,7 +746,7 @@ impl Handler<ClientRequest> for Raft {
     async fn handle(&mut self, _self_ref: &ModuleRef<Self>, msg: ClientRequest) {
         let ClientRequest { reply_to, content } = msg;
 
-        match content {
+        match &content {
             ClientRequestContent::Command { command, client_id, sequence_num, lowest_sequence_num_without_response } => {
 
             },
