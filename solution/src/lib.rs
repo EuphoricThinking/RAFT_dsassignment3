@@ -1,5 +1,6 @@
 use std::{collections::HashMap, time::SystemTime};
 
+use bincode::Error;
 use module_system::{Handler, ModuleRef, System, TimerHandle};
 use uuid::{timestamp::context, Uuid};
 use std::collections::HashSet;
@@ -52,9 +53,50 @@ impl Raft {
         stable_storage: Box<dyn StableStorage>,
         message_sender: Box<dyn RaftSender>,
     ) -> ModuleRef<Self> {
-        // recover
+        let zero_log = Raft::get_zero_log(first_log_entry_timestamp, config.servers.clone());
+        let restored_state = Raft::restore_state_storage(&stable_storage, config.self_id, zero_log.clone()).await;
 
-        todo!()
+        // recover
+        let self_ref = system
+            .register_module(Self {
+                process_type: Default::default(),
+                config: config,
+                persistent_state: restored_state,
+                // Identifier of a process which is thought to be the leader.
+                leader_id: None,
+                sender: message_sender,
+                storage: stable_storage,
+                // granted_votes: HashSet<Uuid>,
+                // sending_set: HashSet<Uuid>,
+                election_timer: None,
+                self_ref: None,
+                heartbeat_timer: None,
+                zero_log: zero_log,
+                commit_index: 0,
+                last_applied: 0,
+                state_machine: state_machine,
+                client_requests: HashMap::new(),
+                
+                // leader attributes
+                next_index: HashMap::new(),
+                match_index: HashMap::new(),
+            })
+            .await;
+        self_ref.send(Init).await;
+        self_ref
+
+        // todo!()
+    }
+
+    fn get_zero_log(first_log_entry_timestamp: SystemTime, servers: HashSet<Uuid>) ->  LogEntry {
+        let entry = LogEntry{
+            content: LogEntryContent::Configuration { servers: servers },
+            term: 0,
+            timestamp: first_log_entry_timestamp,
+        };
+
+        entry
+        // unimplemented!()
     }
 
     async fn broadcast(&self, msg: RaftMessage) { 
@@ -134,6 +176,35 @@ impl Raft {
                 }
             }
         }
+    }
+
+    async fn restore_state_storage(storage: &Box<dyn StableStorage>, self_id: Uuid, zero_log: LogEntry,) -> PersistentState {
+        let restore_res = storage.get(&self_id.to_string()).await;
+        match restore_res {
+            None => {
+                let logs = vec![zero_log];
+                let state = PersistentState{
+                    current_term: 0,
+                    voted_for: None,
+                    log: logs,
+                };
+
+                return state;
+            },
+
+            Some(restored) => {
+                let deserialize_res: Result<PersistentState, Error> = bincode::deserialize(&restored);
+                match deserialize_res {
+                    Err(msg) => {
+                        panic!("Intended panic: bincode desrialization error in persistent state retrieval");
+                    },
+                    Ok(state) =>
+                        return state,
+                }
+            }
+        }
+
+        unimplemented!()
     }
 
     async fn update_candidate(&mut self, candidate_id: Uuid) {
@@ -923,5 +994,13 @@ impl Handler<HeartbeatTick> for Raft {
             // the leader is a leader till the end of its tenure, therefore the leadership change is not expected; however, safety never hurt anybody
             handle.stop().await;
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl Handler<Init> for Raft {
+    async fn handle(&mut self, self_ref: &ModuleRef<Self>, _msg: Init) {
+        self.self_ref = Some(self_ref.clone());
+        self.reset_election_timer().await;
     }
 }

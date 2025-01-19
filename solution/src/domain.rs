@@ -312,3 +312,6 @@ pub struct ElectionTimeout;
 
 #[derive (Clone)]
 pub struct HeartbeatTick;
+
+#[derive (Clone)]
+pub struct Init;
