@@ -500,7 +500,7 @@ impl Raft {
             else {
                 /*
                 Iteratively, we have found the first matching log
-                since the leader decremented the last matching index
+                since the leader decremented nextIdx
                 Therefore, if we have found the first matching log,
                 we can delete entires following the last matching log
                  */
@@ -554,19 +554,23 @@ impl Raft {
         self.next_index.insert(follower_id, next_to_insert);
     }
 
-    fn update_decrement_next_idx(&mut self, follower_id: Uuid, last_verified_idx: usize) {
-        let next_to_insert = last_verified_idx.saturating_sub(1);
+    fn update_decrement_next_idx(&mut self, follower_id: Uuid, ) { //last_verified_idx: usize) {
+        // let next_to_insert = last_verified_idx.saturating_sub(1);
         let next_idx = self.next_index.get_mut(&follower_id);
 
-        match next_idx {
-            None => {
-                // this should not happen
-                self.next_index.insert(follower_id, next_to_insert);
-            },
-            Some(idx) => {
-                *idx = idx.saturating_sub(1);
-            }
+        if let Some(idx) = next_idx {
+            *idx = idx.saturating_sub(1);
         }
+
+        // match next_idx {
+        //     None => {
+        //         // this should not happen
+        //         self.next_index.insert(follower_id, next_to_insert);
+        //     },
+        //     Some(idx) => {
+        //         *idx = idx.saturating_sub(1);
+        //     }
+        // }
     }
 
     async fn send_up_to_batch_size(&mut self, follower_id: Uuid) {
@@ -717,7 +721,6 @@ impl Raft {
                     self.send_up_to_batch_size(source).await;
                 }
 
-                // when to update match and next indices?
                 /*
                 success - the entries have been appended, therefore we can update the match index
                 */
@@ -728,8 +731,7 @@ impl Raft {
                 // }
             }
             else {
-                    // we are still a leader
-                    self.update_decrement_next_idx(source, last_verified_log_index);
+                    self.update_decrement_next_idx(source); //, last_verified_log_index);
                     let empty_entry = self.get_empty_append_entry(source);
                     self.sender.send(&source, empty_entry).await;
             }
@@ -920,6 +922,7 @@ impl Handler<ElectionTimeout> for Raft {
             },
             ProcessType::Leader => {
                 if self.heartbeat_response.len() < (self.config.servers.len() / 2) {
+                    self.heartbeat_response.clear();
                     self.convert_to_follower(self.persistent_state.current_term, None).await;
                 }
                 else {
