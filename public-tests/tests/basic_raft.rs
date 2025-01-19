@@ -672,3 +672,175 @@ async fn follower_ignores_request_vote_within_election_timeout_of_leader_heartbe
 
     system.shutdown().await;
 }
+
+// #[tokio::test]
+// #[timeout(1000)]
+// async fn follower_gets_logs_after_crash() {
+//     // given
+//     let mut system = System::new().await;
+//     let leader_id = Uuid::new_v4();
+//     println!("leader: {}", leader_id);
+//     let follower_id = Uuid::new_v4();
+//     let spy_id = Uuid::new_v4();
+//     println!("spy {}", spy_id);
+//     let processes = vec![leader_id, follower_id, spy_id];
+//     let sender = ExecutorSender::default();
+//     let first_log_entry_timestamp = SystemTime::now();
+//     let leader = Raft::new(
+//         &mut system,
+//         make_config(leader_id, Duration::from_millis(100), processes.clone()),
+//         first_log_entry_timestamp,
+//         Box::new(IdentityMachine),
+//         Box::<RamStorage>::default(),
+//         Box::new(sender.clone()),
+//     )
+//     .await;
+//     let follower = Raft::new(
+//         &mut system,
+//         make_config(follower_id, Duration::from_millis(300), processes.clone()),
+//         first_log_entry_timestamp,
+//         Box::new(IdentityMachine),
+//         Box::<RamStorage>::default(),
+//         Box::new(sender.clone()),
+//     )
+//     .await;
+//     sender.insert(leader_id, Box::new(leader.clone())).await;
+//     sender.insert(follower_id, Box::new(follower.clone())).await;
+//     tokio::time::sleep(Duration::from_millis(150)).await;
+
+//     // when
+//     let (spy_sender, mut spy_receiver) = unbounded_channel();
+//     sender
+//         .insert(
+//             spy_id,
+//             Box::new(RaftSpy::new(&mut system, None, spy_sender).await),
+//         )
+//         .await;
+
+//     follower
+//         .send(RaftMessage {
+//             header: RaftMessageHeader {
+//                 source: spy_id,
+//                 term: 2,
+//             },
+//             content: RaftMessageContent::RequestVote(RequestVoteArgs {
+//                 last_log_index: 0,
+//                 last_log_term: 0,
+//             }),
+//         })
+//         .await;
+//     leader
+//         .send(RaftMessage {
+//             header: RaftMessageHeader {
+//                 source: spy_id,
+//                 term: 2,
+//             },
+//             content: RaftMessageContent::RequestVote(RequestVoteArgs {
+//                 last_log_index: 0,
+//                 last_log_term: 0,
+//             }),
+//         })
+//         .await;
+//     tokio::time::sleep(Duration::from_millis(500)).await;
+
+//     let (leader_result_sender, mut leader_result_receiver) = unbounded_channel();
+//     let client_id =
+//         register_client(&leader, &leader_result_sender, &mut leader_result_receiver).await;
+
+//     leader
+//     .send(ClientRequest {
+//         reply_to: leader_result_sender.clone(),
+//         content: ClientRequestContent::Command {
+//             command: vec![5, 6, 7, 8],
+//             client_id,
+//             sequence_num: 0,
+//             lowest_sequence_num_without_response: 0,
+//         },
+//     })
+//     .await;
+
+//     leader
+//         .send(ClientRequest {
+//             reply_to: leader_result_sender.clone(),
+//             content: ClientRequestContent::Command {
+//                 command: vec![7, 7, 7, 2],
+//                 client_id,
+//                 sequence_num: 2,
+//                 lowest_sequence_num_without_response: 0,
+//             },
+//         })
+//         .await;
+//     // then
+//     // while let Ok(msg) = spy_receiver.try_recv() {
+//     //     // println!("{:?}", msg);
+//     //     // // if let RaftMessageContent::AppendEntries(AppendEntriesArgs { entries, .. }) = &msg.content {
+//     //     // //     assert_eq!(entries.len(), 1);
+//     //     // //     assert_eq!(entries[0].term, 1);
+//     //     // //     assert_eq!(entries[0].content, LogEntryContent::NoOp);
+//     //     // // }
+
+//     //     // assert!(matches!(
+//     //     //     msg,
+//     //     //     RaftMessage {
+//     //     //         header: RaftMessageHeader {
+//     //     //             source,
+//     //     //             term: 1,
+//     //     //         },
+//     //     //         content: RaftMessageContent::AppendEntries(AppendEntriesArgs {
+//     //     //             prev_log_index: 0,
+//     //     //             prev_log_term: 0,
+//     //     //             entries: _,
+//     //     //             leader_commit: 1,
+//     //     //         })
+//     //     //     } if source == leader_id
+//     //     // ));
+//     //     // if let RaftMessageContent::AppendEntries(AppendEntriesArgs { entries, .. }) = msg.content {
+//     //     //     assert_eq!(entries.len(), 1);
+//     //     //     assert_eq!(entries[0].term, 1);
+//     //     //     assert_eq!(entries[0].content, LogEntryContent::NoOp);
+//     //     // }
+//     // }
+
+//     let spy = Raft::new(
+//         &mut system,
+//         make_config(spy_id, Duration::from_millis(300), processes),
+//         first_log_entry_timestamp,
+//         Box::new(IdentityMachine),
+//         Box::<RamStorage>::default(),
+//         Box::new(sender.clone()),
+//     )
+//     .await;
+
+//     while let Ok(msg) = spy_receiver.try_recv() {
+//         println!("{:?}", msg);
+//         // // if let RaftMessageContent::AppendEntries(AppendEntriesArgs { entries, .. }) = &msg.content {
+//         // //     assert_eq!(entries.len(), 1);
+//         // //     assert_eq!(entries[0].term, 1);
+//         // //     assert_eq!(entries[0].content, LogEntryContent::NoOp);
+//         // // }
+
+//         // assert!(matches!(
+//         //     msg,
+//         //     RaftMessage {
+//         //         header: RaftMessageHeader {
+//         //             source,
+//         //             term: 1,
+//         //         },
+//         //         content: RaftMessageContent::AppendEntries(AppendEntriesArgs {
+//         //             prev_log_index: 0,
+//         //             prev_log_term: 0,
+//         //             entries: _,
+//         //             leader_commit: 1,
+//         //         })
+//         //     } if source == leader_id
+//         // ));
+//         // if let RaftMessageContent::AppendEntries(AppendEntriesArgs { entries, .. }) = msg.content {
+//         //     assert_eq!(entries.len(), 1);
+//         //     assert_eq!(entries[0].term, 1);
+//         //     assert_eq!(entries[0].content, LogEntryContent::NoOp);
+//         // }
+//     }
+
+//     panic!("");
+//     system.shutdown().await;
+// }

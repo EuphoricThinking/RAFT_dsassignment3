@@ -402,17 +402,17 @@ impl Raft {
         }
     }
 
-    async fn broadcast_nop(&self) {
-        let nop_entry = self.get_last_log_entry();
+    // async fn broadcast_nop(&self) {
+    //     let nop_entry = self.get_last_log_entry();
 
-        for follower_id in &self.config.servers {
-            if *follower_id != self.config.self_id {
-                let append_entry = self.get_append_entry(vec![nop_entry.clone()], *follower_id);
-                println!("broadcast nop:{:?}\n", append_entry);
-                self.sender.send(follower_id, append_entry).await;
-            }
-        }
-    }
+    //     for follower_id in &self.config.servers {
+    //         if *follower_id != self.config.self_id {
+    //             let append_entry = self.get_append_entry(vec![nop_entry.clone()], *follower_id);
+    //             println!("broadcast nop:{:?}\n", append_entry);
+    //             self.sender.send(follower_id, append_entry).await;
+    //         }
+    //     }
+    // }
 
     fn get_log_entry(&self, content: LogEntryContent) -> LogEntry {
         LogEntry{
