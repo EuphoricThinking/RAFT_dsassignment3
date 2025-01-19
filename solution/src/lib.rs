@@ -209,7 +209,7 @@ impl Raft {
             }
         }
 
-        unimplemented!()
+        // unimplemented!()
     }
 
     async fn update_candidate(&mut self, candidate_id: Uuid) {
