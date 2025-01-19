@@ -497,7 +497,7 @@ impl Raft {
                 // -1 is the log before the logs we are going to send
                 let prev_idx = (*next_idx).saturating_sub(1);
                 let prev_log = &self.persistent_state.log[prev_idx];
-                return (*next_idx, prev_log.term);
+                return (prev_idx, prev_log.term);
             }
         }
         // unimplemented!()
