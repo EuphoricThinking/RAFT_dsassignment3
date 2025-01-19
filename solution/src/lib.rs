@@ -463,15 +463,16 @@ impl Raft {
     }
 
     fn update_match_idx(&mut self, follower_id: Uuid, last_verified_idx: usize) {
-        let follower_val = self.match_index.get_mut(&follower_id);
-        match follower_val {
-            None => {
-                self.match_index.insert(follower_id, last_verified_idx);
-            },
-            Some(val) => {
-                *val = last_verified_idx;
-            }
-        }
+        self.match_index.insert(follower_id, last_verified_idx);
+        // let follower_val = self.match_index.get_mut(&follower_id);
+        // match follower_val {
+        //     None => {
+        //         self.match_index.insert(follower_id, last_verified_idx);
+        //     },
+        //     Some(val) => {
+        //         *val = last_verified_idx;
+        //     }
+        // }
     }
 
     fn get_last_matching_idx_data(&self, follower_id: Uuid) -> (usize, u64) {
@@ -520,17 +521,19 @@ impl Raft {
 
     fn update_next_idx_after_success(&mut self, follower_id: Uuid, last_verified_idx: usize) {
         let next_to_insert = last_verified_idx + 1;
+        // the value is updated
+        self.next_index.insert(follower_id, next_to_insert);
 
-        let next_idx = self.next_index.get_mut(&follower_id);
+        // let next_idx = self.next_index.get_mut(&follower_id);
 
-        match next_idx {
-            None => {
-                self.next_index.insert(follower_id, next_to_insert);
-            },
-            Some(idx) => {
-                *idx = next_to_insert;
-            }
-        }
+        // match next_idx {
+        //     None => {
+        //         self.next_index.insert(follower_id, next_to_insert);
+        //     },
+        //     Some(idx) => {
+        //         *idx = next_to_insert;
+        //     }
+        // }
     }
 
     fn update_decrement_next_idx(&mut self, follower_id: Uuid, last_verified_idx: usize) {
@@ -686,20 +689,20 @@ impl Raft {
                 // last_verified_log - last idx present in both server and a follower
                 // last_log_idx - idx of the last log in the server
                 // send messages only if the follower is behind the server
-                if last_verified_log_index != self.get_last_log_idx() {
-                    self.update_match_idx(source, last_verified_log_index);
-                    self.update_next_idx_after_success(source, last_verified_log_index);
-                    self.send_up_to_batch_size(source).await;
+                // if last_verified_log_index != self.get_last_log_idx() {
+                self.update_match_idx(source, last_verified_log_index);
+                self.update_next_idx_after_success(source, last_verified_log_index);
+                self.send_up_to_batch_size(source).await;
 
-                    // when to update match and next indices?
-                    /*
-                    success - the entries have been appended, therefore we can update the match index
-                    */
+                // when to update match and next indices?
+                /*
+                success - the entries have been appended, therefore we can update the match index
+                */
 
-                    // SUCCESS - check if possible to commit
-                    // send to a client
-                    self.commit_and_send_current_entry_and_maybe_previous_if_majority_agrees(last_verified_log_index).await;
-                }
+                // SUCCESS - check if possible to commit
+                // send to a client
+                self.commit_and_send_current_entry_and_maybe_previous_if_majority_agrees(last_verified_log_index).await;
+                // }
             }
             else {
                     // we are still a leader
