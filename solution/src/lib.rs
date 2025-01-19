@@ -292,8 +292,14 @@ impl Raft {
     }
 
     async fn broadcast_heartbeat(&self) {
-        let hearbeat = self.get_empty_append_entry();
-        self.broadcast(hearbeat).await;
+        // let hearbeat = self.get_empty_append_entry();
+        // self.broadcast(hearbeat).await;
+        for follower_id in &self.config.servers {
+            if *follower_id != self.config.self_id {
+                let append_entry = self.get_append_entry(Vec::new(), *follower_id);
+                self.sender.send(follower_id, append_entry).await;
+            }
+        }
     }
 
     fn get_log_entry(&self, content: LogEntryContent) -> LogEntry {
@@ -679,18 +685,23 @@ impl Raft {
             // check the entries length
             // send a batch
             // don't send multiple batches - network errors possible, reordering possible
-            self.update_match_idx(source, last_verified_log_index);
-            self.update_next_idx_after_success(source, last_verified_log_index);
-            self.send_up_to_batch_size(source).await;
+            // last_verified_log - last idx present in both server and a follower
+            // last_log_idx - idx of the last log in the server
+            // send messages only if the follower is behind the server
+            if last_verified_log_index != self.get_last_log_idx() {
+                self.update_match_idx(source, last_verified_log_index);
+                self.update_next_idx_after_success(source, last_verified_log_index);
+                self.send_up_to_batch_size(source).await;
 
-            // when to update match and next indices?
-            /*
-            success - the entries have been appended, therefore we can update the match index
-             */
+                // when to update match and next indices?
+                /*
+                success - the entries have been appended, therefore we can update the match index
+                */
 
-            // SUCCESS - check if possible to commit
-            // send to a client
-            self.commit_and_send_current_entry_and_maybe_previous_if_majority_agrees(last_verified_log_index).await;
+                // SUCCESS - check if possible to commit
+                // send to a client
+                self.commit_and_send_current_entry_and_maybe_previous_if_majority_agrees(last_verified_log_index).await;
+            }
         }
         else {
             // check term for update
