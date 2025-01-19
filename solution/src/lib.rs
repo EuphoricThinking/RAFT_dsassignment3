@@ -519,17 +519,15 @@ impl Raft {
     }
 
     fn update_next_idx_after_success(&mut self, follower_id: Uuid, last_verified_idx: usize) {
-        let last_log_idx = self.get_last_log_idx();
+        let next_to_insert = last_verified_idx + 1;
 
         let next_idx = self.next_index.get_mut(&follower_id);
 
         match next_idx {
             None => {
-                let next_to_insert = min(self.get_last_log_idx(), last_verified_idx + 1);
                 self.next_index.insert(follower_id, next_to_insert);
             },
             Some(idx) => {
-                let next_to_insert = min(last_verified_idx + 1, last_log_idx);
                 *idx = next_to_insert;
             }
         }
@@ -728,7 +726,7 @@ impl Raft {
         let last_log = self.get_last_log_entry();
 
         for follower_id in &self.config.servers {
-            
+
         }
     }
     async fn handle_client_command_request(&mut self, command: ClientRequestContent, reply_to: UnboundedSender<ClientRequestResponse>) {
