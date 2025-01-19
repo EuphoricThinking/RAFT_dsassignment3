@@ -265,9 +265,12 @@ impl Raft {
         // if our term is newer - reject the message
         // leader sets himself as a leader
         // if we are connected to the leader - reject
-        if self.persistent_state.current_term > term || self.leader_id.is_some() {
-            println!("rejecting of leader: {:?} from {}", self.leader_id, source);
+        if self.persistent_state.current_term > term { //|| self.leader_id.is_some() {
             self.send_request_response(source, false).await;
+        }
+        else if self.leader_id.is_some() {
+            // ignore
+            println!("rejecting of leader: {:?} from {}", self.leader_id, source);
         }
         else {
             // if self.persistent_state.current_term < term {
@@ -389,6 +392,18 @@ impl Raft {
         }
     }
 
+    async fn broadcast_nop(&self) {
+        let nop_entry = self.get_last_log_entry();
+
+        for follower_id in &self.config.servers {
+            if *follower_id != self.config.self_id {
+                let append_entry = self.get_append_entry(vec![nop_entry.clone()], *follower_id);
+                println!("broadcast nop:{:?}\n", append_entry);
+                self.sender.send(follower_id, append_entry).await;
+            }
+        }
+    }
+
     fn get_log_entry(&self, content: LogEntryContent) -> LogEntry {
         LogEntry{
             content: content,
@@ -426,6 +441,12 @@ impl Raft {
             handle.stop().await;
         }
 
+        self.push_nop_to_log().await;
+        self.next_index = self.initialize_leader_hashmaps(self.get_last_log_idx()); // without +1, since nextIdx should be initialized with nop idx
+        self.match_index = self.initialize_leader_hashmaps(0);
+
+        self.broadcast_nop().await;
+
         self.heartbeat_timer = Some(
             self.self_ref
                 .as_ref()
@@ -433,10 +454,6 @@ impl Raft {
                 .request_tick(HeartbeatTick, self.config.heartbeat_timeout)
                 .await,
         );
-
-        self.push_nop_to_log().await;
-        self.next_index = self.initialize_leader_hashmaps(self.get_last_log_idx()); // without +1, since nextIdx should be initialized with nop idx
-        self.match_index = self.initialize_leader_hashmaps(0);
     }
 
     async fn handle_request_response(&mut self, request_response: RequestVoteResponseArgs, header: RaftMessageHeader) {
@@ -557,7 +574,11 @@ impl Raft {
                 self.convert_to_follower(term, Some(source)).await;
             }
             else {
-                self.reset_election_timer().await;
+                if let Some(leader_id) = self.leader_id {
+                    if leader_id == source {
+                        self.reset_election_timer().await;
+                    }
+                }
                 // reset is issued additionally during conversion
             }
 
@@ -632,6 +653,7 @@ impl Raft {
     fn get_append_entry(&self, entries: Vec<LogEntry>, follower_id: Uuid) -> RaftMessage{
         let header = self.get_self_header();
         let (prev_idx, prev_term) = self.get_prev_idx_term(follower_id);
+        // println!("entires: {:?}", entries);
         let args = AppendEntriesArgs{
             prev_log_index: prev_idx,
             prev_log_term: prev_term,
@@ -679,9 +701,11 @@ impl Raft {
 
         if let Some(match_idx) = match_res {
             let num_logs_to_send = self.get_last_log_idx().saturating_sub(*match_idx);
+            // println!("match idx {}, last_log_idx {} num to send {}", *match_idx, self.get_last_log_idx(), num_logs_to_send);
             let logs_per_batch = min(num_logs_to_send, self.config.append_entries_batch_size);
+            // println!("logs per batch {}", logs_per_batch);
             let end_range_first_idx_not_to_be_sent = logs_per_batch + match_idx;
-            let start_range_first_idx_to_be_sent = match_idx + 1;
+            let start_range_first_idx_to_be_sent = min(match_idx + 1, end_range_first_idx_not_to_be_sent);
             /*
             match_idx is already included
             match_idx = 1
@@ -817,7 +841,11 @@ impl Raft {
                 // if last_verified_log_index != self.get_last_log_idx() {
                 self.update_match_idx(source, last_verified_log_index);
                 self.update_next_idx_after_success(source, last_verified_log_index);
-                self.send_up_to_batch_size(source).await;
+
+                if last_verified_log_index != self.get_last_log_idx() {
+                    // println!("last_verified is not batch");
+                    self.send_up_to_batch_size(source).await;
+                }
 
                 // when to update match and next indices?
                 /*

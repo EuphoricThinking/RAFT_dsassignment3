@@ -642,6 +642,12 @@ async fn follower_ignores_request_vote_within_election_timeout_of_leader_heartbe
     // then
     while let Ok(msg) = spy_receiver.try_recv() {
         println!("{:?}", msg);
+        // if let RaftMessageContent::AppendEntries(AppendEntriesArgs { entries, .. }) = &msg.content {
+        //     assert_eq!(entries.len(), 1);
+        //     assert_eq!(entries[0].term, 1);
+        //     assert_eq!(entries[0].content, LogEntryContent::NoOp);
+        // }
+
         assert!(matches!(
             msg,
             RaftMessage {
