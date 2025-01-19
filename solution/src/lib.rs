@@ -556,7 +556,11 @@ impl Raft {
     async fn handle_append_entries(&mut self, append_entries: AppendEntriesArgs, header: RaftMessageHeader) {
         let last_verified_log_index = self.get_last_verified_log_index(&append_entries);
 
+        println!("{:?}", append_entries);
+
         let AppendEntriesArgs { prev_log_index, prev_log_term, mut entries, leader_commit } = append_entries;
+
+        println!("last verified: {}", last_verified_log_index);
 
         let RaftMessageHeader{source, term} = header;
 
@@ -704,7 +708,7 @@ impl Raft {
             // println!("match idx {}, last_log_idx {} num to send {}", *match_idx, self.get_last_log_idx(), num_logs_to_send);
             let logs_per_batch = min(num_logs_to_send, self.config.append_entries_batch_size);
             // println!("logs per batch {}", logs_per_batch);
-            let end_range_first_idx_not_to_be_sent = logs_per_batch + match_idx;
+            let end_range_first_idx_not_to_be_sent = logs_per_batch + match_idx + 1;
             let start_range_first_idx_to_be_sent = min(match_idx + 1, end_range_first_idx_not_to_be_sent);
             /*
             match_idx is already included
@@ -712,10 +716,14 @@ impl Raft {
             last_idx = 3
             0 1 || 2 3
             3 - 1 = 2 elements to be sent
+
+            match idx + 1 = 2 /// from the 2nd element, the first element to be sent
             last idx in drain range is excluded
              */
             let entries_to_append = &self.persistent_state.log[start_range_first_idx_to_be_sent..end_range_first_idx_not_to_be_sent];
             let append_entry = self.get_append_entry(entries_to_append.to_vec(), follower_id);
+
+            println!("last idx {} | match_idx: {} | entries to send: {:?}", self.get_last_log_idx(), *match_idx, append_entry);
 
             self.sender.send(&follower_id, append_entry).await;
         }
