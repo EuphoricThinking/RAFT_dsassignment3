@@ -729,7 +729,24 @@ impl Raft {
         let last_log = self.get_last_log_entry();
 
         for follower_id in &self.config.servers {
+            let next_idx_res = self.next_index.get(follower_id);
+            if let Some(next_idx) = next_idx_res {
+                if *next_idx == self.get_last_log_idx() {
+                    // the follower is up to date
+                    let wrapped_entry = vec![last_log.clone()];
+                    let entry_to_send = self.get_append_entry(wrapped_entry, *follower_id);
+                    self.sender.send(follower_id, entry_to_send).await;
+                }
+                else {
+                    /*
+                    When a leader has log entries to send to a follower, it should send AppendEntries immediately (rather than send AppendEntries only on heartbeat timeouts).
 
+                    I understand that we should always send AppendEntry when there is a new log
+                     */
+                    let empty_entry = self.get_empty_append_entry(*follower_id);
+                    self.sender.send(follower_id, empty_entry).await;
+                }
+            }
         }
     }
     async fn handle_client_command_request(&mut self, command: ClientRequestContent, reply_to: UnboundedSender<ClientRequestResponse>) {
