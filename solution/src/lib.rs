@@ -699,6 +699,8 @@ impl Raft {
             else {
                 // we are still a leader
                 self.update_decrement_next_idx(source, last_verified_log_index);
+                let empty_entry = self.get_empty_append_entry(source);
+                self.sender.send(&source, empty_entry).await;
             }
         }
     }
