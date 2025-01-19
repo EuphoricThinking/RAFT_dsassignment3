@@ -76,14 +76,14 @@ impl Raft {
         header
     }
 
-    fn get_last_log_and_idx(&self) -> (u64, usize)  {
+    fn get_last_log_term_and_idx(&self) -> (u64, usize)  {
         // return (self.persistent_state.log.last(), self.persistent_state.log.len());
         return (self.get_last_log_term(), self.get_last_log_idx());
     }
 
     fn is_other_log_at_least_as_up_to_date_as_self(&self, last_log_index: usize, last_log_term: u64) -> bool {
         // let self_last_log_idx
-        let (self_term, self_idx) = self.get_last_log_and_idx();
+        let (self_term, self_idx) = self.get_last_log_term_and_idx();
 
         // match self_log {
         //     // idx zero for empty log
@@ -803,6 +803,34 @@ impl Raft {
                 self.decline_client_command_send_leader_id(command, reply_to);
             }
         }
+
+    async fn broadcast_request_vote(&mut self) {
+        let (last_term, last_idx) = self.get_last_log_term_and_idx();
+        let args = RequestVoteArgs{
+            last_log_index: last_idx,
+            last_log_term: last_term,
+        };
+        let content = RaftMessageContent::RequestVote(args);
+        
+        let header = self.get_self_header();
+        let msg = RaftMessage { header: header, content: content,};
+
+        self.broadcast(msg).await;
+    }
+
+    async fn convert_to_a_candidate_start_election(&mut self) {
+        let new_term = self.persistent_state.current_term + 1;
+        self.update_term(new_term).await;
+
+        let mut votes_granted: HashSet<Uuid> = HashSet::new();
+        votes_granted.insert(self.config.self_id);
+        self.process_type = ProcessType::Candidate { votes_received: votes_granted };
+
+        self.update_candidate(self.config.self_id).await;
+        self.reset_election_timer().await;
+
+        self.broadcast_request_vote().await;
+    }
 }
 
 #[async_trait::async_trait]
@@ -867,10 +895,16 @@ impl Handler<ElectionTimeout> for Raft {
     async fn handle(&mut self, _self_ref: &ModuleRef<Self>, _: ElectionTimeout) {
         match &mut self.process_type  {
             ProcessType::Follower => {
-
+                self.convert_to_a_candidate_start_election().await;
             },
             ProcessType::Candidate { votes_received } => {
-
+                if votes_received.len() > (self.config.servers.len() / 2) {
+                    self.become_a_leader().await;
+                }
+                else {
+                    // start new election
+                    self.convert_to_a_candidate_start_election().await;
+                }
             },
             ProcessType::Leader => {
                 // not affected - skip
