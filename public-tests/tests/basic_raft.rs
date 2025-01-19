@@ -575,8 +575,10 @@ async fn follower_ignores_request_vote_within_election_timeout_of_leader_heartbe
     // given
     let mut system = System::new().await;
     let leader_id = Uuid::new_v4();
+    println!("leader: {}", leader_id);
     let follower_id = Uuid::new_v4();
     let spy_id = Uuid::new_v4();
+    println!("spy {}", spy_id);
     let processes = vec![leader_id, follower_id, spy_id];
     let sender = ExecutorSender::default();
     let first_log_entry_timestamp = SystemTime::now();
@@ -639,6 +641,7 @@ async fn follower_ignores_request_vote_within_election_timeout_of_leader_heartbe
 
     // then
     while let Ok(msg) = spy_receiver.try_recv() {
+        println!("{:?}", msg);
         assert!(matches!(
             msg,
             RaftMessage {

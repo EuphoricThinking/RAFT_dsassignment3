@@ -266,7 +266,7 @@ impl Raft {
         // leader sets himself as a leader
         // if we are connected to the leader - reject
         if self.persistent_state.current_term > term || self.leader_id.is_some() {
-            // println!("rejecting of leader: {:?}", self.leader_id);
+            println!("rejecting of leader: {:?} from {}", self.leader_id, source);
             self.send_request_response(source, false).await;
         }
         else {
@@ -287,7 +287,7 @@ impl Raft {
 
             if self.persistent_state.current_term < term {
                 // convert to a follower if a term is newer, grant a vote
-                // println!("followering");
+                println!("followering term {} leader: {:?}", term, self.leader_id);
                 self.convert_to_follower(term, None).await;
                 // self.update_candidate(source).await;
             }
@@ -416,6 +416,7 @@ impl Raft {
     }
 
     async fn become_a_leader(&mut self) {
+        println!("becoming a leader: {}", self.config.self_id);
         self.leader_id = Some(self.config.self_id);
         self.process_type = ProcessType::Leader;
 
@@ -543,7 +544,7 @@ impl Raft {
         let RaftMessageHeader{source, term} = header;
 
         // TODO here loops
-        // println!("msg term: {}", term);
+        // println!("msg term: {} from {}", term, source);
         // we got a message from an older term
         if self.persistent_state.current_term > term {
             self.send_append_entry_response(false, last_verified_log_index, source).await;
@@ -551,7 +552,7 @@ impl Raft {
         else {
             // we have rejected the message with a smaller term
             // now the term is at least as high as ours
-            if self.persistent_state.current_term < term || self.is_candidate() {
+            if self.persistent_state.current_term < term || self.is_candidate() || self.leader_id.is_none() {
                 // println!("converting {} -> {}", self.persistent_state.current_term, term);
                 self.convert_to_follower(term, Some(source)).await;
             }
@@ -1012,7 +1013,7 @@ impl Handler<ElectionTimeout> for Raft {
     async fn handle(&mut self, _self_ref: &ModuleRef<Self>, _: ElectionTimeout) {
         match &mut self.process_type  {
             ProcessType::Follower => {
-                // println!("timeouted follower");
+                println!("timeouted follower {} leader {:?}", self.config.self_id, self.leader_id);
                 self.convert_to_a_candidate_start_election().await;
             },
             ProcessType::Candidate { votes_received } => {
@@ -1026,6 +1027,7 @@ impl Handler<ElectionTimeout> for Raft {
             },
             ProcessType::Leader => {
                 // not affected - skip
+                println!("timoeuted leaer");
             }
         }
     }
