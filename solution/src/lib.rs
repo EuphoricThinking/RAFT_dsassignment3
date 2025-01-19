@@ -4,12 +4,9 @@ use bincode::Error;
 use module_system::{Handler, ModuleRef, System, TimerHandle};
 use uuid::Uuid;
 use std::collections::HashSet;
-// use std::future::Future;
-// use tokio::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use rand::{self, Rng};
 use std::cmp::min;
-// use tokio::task::JoinHandle;
 
 pub use domain::*;
 
@@ -27,8 +24,6 @@ pub struct Raft {
     leader_id: Option<Uuid>,
     sender: Box<dyn RaftSender>,
     storage: Box<dyn StableStorage>,
-    // granted_votes: HashSet<Uuid>,
-    // sending_set: HashSet<Uuid>,
     election_timer: Option<TimerHandle>,
     self_ref: Option<ModuleRef<Self>>,
     heartbeat_timer: Option<TimerHandle>,
@@ -55,11 +50,9 @@ impl Raft {
         stable_storage: Box<dyn StableStorage>,
         message_sender: Box<dyn RaftSender>,
     ) -> ModuleRef<Self> {
-        // println!("entering");
         let zero_log = Raft::get_zero_log(first_log_entry_timestamp, config.servers.clone());
         let restored_state = Raft::restore_state_storage(&stable_storage, config.self_id, zero_log.clone()).await;
 
-        // recover
         let self_ref = system
             .register_module(Self {
                 process_type: Default::default(),
@@ -69,8 +62,6 @@ impl Raft {
                 leader_id: None,
                 sender: message_sender,
                 storage: stable_storage,
-                // granted_votes: HashSet<Uuid>,
-                // sending_set: HashSet<Uuid>,
                 election_timer: None,
                 self_ref: None,
                 heartbeat_timer: None,
@@ -87,7 +78,6 @@ impl Raft {
             })
             .await;
         self_ref.send(Init).await;
-        // println!("initialized");
         self_ref
 
         // todo!()
@@ -101,19 +91,13 @@ impl Raft {
         };
 
         entry
-        // unimplemented!()
     }
 
     async fn broadcast(&self, msg: RaftMessage) { 
-        // TODO change to join_all?
-        // let futures: Vec<Future> = Vec::new();
-        // let tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
         for target in &self.config.servers {
             if *target != self.config.self_id {
                 self.sender.send(&target, msg.clone()).await;
-                // let cloned_sender = *(self.sender).clone();
-                // tasks.push(tokio::spawn(async move {cloned_sender.send(&target, msg.clone()).await;}))
             }
         }
     }
@@ -128,26 +112,11 @@ impl Raft {
     }
 
     fn get_last_log_term_and_idx(&self) -> (u64, usize)  {
-        // return (self.persistent_state.log.last(), self.persistent_state.log.len());
         return (self.get_last_log_term(), self.get_last_log_idx());
     }
 
     fn is_other_log_at_least_as_up_to_date_as_self(&self, last_log_index: usize, last_log_term: u64) -> bool {
-        // let self_last_log_idx
-        let (self_term, self_idx) = self.get_last_log_term_and_idx();
-
-        // match self_log {
-        //     // idx zero for empty log
-        //     None =>  {
-        //     // the sent log has either no elements (as our log),
-        //     // thus it is as up-to-date as ours
-        //     // or can have any entry, which is more up-to-date as ours
-        //         return true;
-        //     },
-
-        //     Some(log) => {
-                // let self_term = log.term;
-                
+        let (self_term, self_idx) = self.get_last_log_term_and_idx();                
                 if last_log_term > self_term {
                     // our term is older
                     return true;
@@ -155,8 +124,6 @@ impl Raft {
                 else { 
                     return (self_term == last_log_term) && (self_idx <= last_log_index);
                 }
-        //     }
-        // }
     } 
 
     async fn send_request_response(&self, source: Uuid, vote: bool) {
@@ -173,7 +140,7 @@ impl Raft {
         let serialized_storage = bincode::serialize(&self.persistent_state);
         match serialized_storage {
             Err(_) => {
-                panic!("Serialize storage error");
+                panic!("Intended panic: erialize storage error");
             },
             Ok(res) => {
                 let storage_res = self.storage.put(&self.config.self_id.to_string(), &res).await;
@@ -213,7 +180,6 @@ impl Raft {
             }
         }
 
-        // unimplemented!()
     }
 
     async fn update_candidate(&mut self, candidate_id: Uuid) {
@@ -225,12 +191,6 @@ impl Raft {
         self.persistent_state.current_term = new_term;
         self.update_storage().await;    
     }
-
-    // async fn update_term_if_newer(&mut self, new_term: u64) {
-    //     if self.persistent_state.current_term < new_term {
-    //         self.update_term(new_term).await;
-    //     }
-    // }
 
     async fn convert_to_follower(&mut self, current_term: u64, leader: Option<Uuid>) {
         self.update_term(current_term).await;
@@ -263,75 +223,39 @@ impl Raft {
         let RequestVoteArgs { last_log_index, last_log_term } = request_vote;
         let RaftMessageHeader { source, term } = request_header;
 
-        // println!("requesting source {}   TO   {}", source, self.config.self_id);//term, self.process_type);
         // if our term is newer - reject the message
         // leader sets himself as a leader
         // if we are connected to the leader - reject
-        if self.persistent_state.current_term > term { //|| self.leader_id.is_some() {
+        if self.persistent_state.current_term > term { 
             self.send_request_response(source, false).await;
         }
         else if self.leader_id.is_some() {
             // ignore
-            println!("rejecting of leader: {:?} from {}", self.leader_id, source);
         }
         else {
-            // if self.persistent_state.current_term < term {
-            //     // convert to a follower
-
-            // }
-            // if log is at least as up-to-date as mine - grant vote, update your vote
-            // match self.persistent_state.voted_for {
-            //     None => {
-            // if self.persistent_state.current_term < term {
-            //     // convert to a follower if a term is newer, grant a vote
-            //     self.convert_to_follower(term, None).await;
-            //     self.update_candidate(source).await;
-            //     self.send_request_response(source, true).await;
-            // }
-                // else {
 
             if self.persistent_state.current_term < term {
                 // convert to a follower if a term is newer, grant a vote
-                println!("followering term {} leader: {:?}", term, self.leader_id);
                 self.convert_to_follower(term, None).await;
-                // self.update_candidate(source).await;
             }
 
             if self.is_other_log_at_least_as_up_to_date_as_self(last_log_index, last_log_term) {
-                // TODO check
-                // if self.persistent_state.current_term < term {
-                //     // convert to a follower if a term is newer, grant a vote
-                //     self.convert_to_follower(term, None).await;
-                //     self.update_candidate(source).await;
-                //     self.send_request_response(source, true).await;
-                // }
-                // else {
                     // we have ruled out self_term > term and self_term < term,
                     // there is only self_term == term left
                     match self.persistent_state.voted_for {
                         None => {
-                            // println!("grant");
                             self.update_candidate(source).await;
                             self.send_request_response(source, true).await;
                         },
                         Some(_id) => {
                             // we have already voted
-                            // println!("we have already voted for? {}", _id);
                             self.send_request_response(source, false).await;
                         }
-                    // }
                 }
             }
             else {
                 self.send_request_response(source, false).await;
             }
-                // }, 
-                // Some(_candidate_id) => {
-                //     // if self.is_other_log_at_least_as_up_to_date_as_self(last_log_index, last_log_term) {
-
-                //     // }
-            
-                // },
         }
     }
 
@@ -343,13 +267,6 @@ impl Raft {
         false
     }
 
-    // fn is_leader(&self) -> bool {
-    //     if let Some(leader_id) = self.leader_id {
-    //         return leader_id == self.config.self_id;
-    //     }
-
-    //     false
-    // }
 
     fn initialize_leader_hashmaps(&self, initial_value: usize) -> LeaderMap {
         let hashmap: LeaderMap = self.config.servers.clone().into_iter().map(|x| (x, initial_value)).collect();
@@ -357,7 +274,7 @@ impl Raft {
         hashmap
     }
 
-    // COnfiguration entry is one lement, but it's index is 0,
+    // Configuration entry is one lement, but it's index is 0,
     // therefore we have to decrement the value 
     fn get_last_log_idx(&self) -> usize {
         self.persistent_state.log.len().saturating_sub(1)
@@ -384,35 +301,13 @@ impl Raft {
     }
 
     async fn broadcast_heartbeat(&mut self) {
-        println!("broadcast heartbeat");
-        // let hearbeat = self.get_empty_append_entry();
-        // self.broadcast(hearbeat).await;
         let servers = self.config.servers.clone();
-        // let self_id = self.config.self_id;
-        for follower_id in servers { //&self.config.servers {
+        for follower_id in servers { 
             if follower_id != self.config.self_id {
-                self.send_up_to_batch_size(follower_id).await; //self.get_empty_append_entry(*follower_id);
-
-                // let match_idx = self.match_index.get(follower_id).unwrap();
-                // let next_idx = self.next_index.get(follower_id).unwrap();
-                // println!("match {} next {} id {} last {}", match_idx, next_idx, follower_id, self.get_last_log_idx());
-                
-                // self.sender.send(follower_id, append_entry).await;
+                self.send_up_to_batch_size(follower_id).await; 
             }
         }
     }
-
-    // async fn broadcast_nop(&self) {
-    //     let nop_entry = self.get_last_log_entry();
-
-    //     for follower_id in &self.config.servers {
-    //         if *follower_id != self.config.self_id {
-    //             let append_entry = self.get_append_entry(vec![nop_entry.clone()], *follower_id);
-    //             println!("broadcast nop:{:?}\n", append_entry);
-    //             self.sender.send(follower_id, append_entry).await;
-    //         }
-    //     }
-    // }
 
     fn get_log_entry(&self, content: LogEntryContent) -> LogEntry {
         LogEntry{
@@ -420,7 +315,6 @@ impl Raft {
             term: self.persistent_state.current_term,
             timestamp: SystemTime::now(),
         }
-        // unimplemented!()
     }
 
     async fn push_to_log(&mut self, log: LogEntry) {
@@ -435,21 +329,12 @@ impl Raft {
 
     async fn push_nop_to_log(&mut self) {
         let nop_entry = self.get_log_entry(LogEntryContent::NoOp);
-        // self.persistent_state.log.push(nop_entry);
-        // self.update_storage().await;
         self.push_to_log(nop_entry).await;
     }
 
     async fn become_a_leader(&mut self) {
-        println!("becoming a leader: {}", self.config.self_id);
         self.leader_id = Some(self.config.self_id);
         self.process_type = ProcessType::Leader;
-
-        // In LA1, the first tick should be sent after the interval elapses
-        // self.broadcast_heartbeat().await;
-        // if let Some(handle) = self.election_timer.take() {
-        //     handle.stop().await;
-        // }
 
         self.heartbeat_response = HashSet::new();
         self.next_index = self.initialize_leader_hashmaps(self.get_last_log_idx() + 1); // +1 will be nop
@@ -470,13 +355,10 @@ impl Raft {
 
     async fn handle_request_response(&mut self, request_response: RequestVoteResponseArgs, header: RaftMessageHeader) {
         if let ProcessType::Candidate { votes_received } = &mut self.process_type {
-            // println!("got vote from {}   //TO// {} || {:?}", header.source, self.config.self_id, request_response);
-            // println!("set before {:?}", votes_received);
 
             if let RequestVoteResponseArgs { vote_granted: true } = request_response {
                 votes_received.insert(header.source);
             }
-            // println!("set after {:?}", votes_received);
 
             if votes_received.len() > (self.config.servers.len() / 2) {
                 self.become_a_leader().await;
@@ -494,7 +376,6 @@ impl Raft {
 
         return RaftMessage{header: header, content: content};
 
-        // unimplemented!()
     }
 
     fn get_last_verified_log_index(&self, append_entries: &AppendEntriesArgs) -> usize {
@@ -518,7 +399,6 @@ impl Raft {
 
             return queried_term == prev_log_term;
         }
-        // unimplemented!()
     }
 
     async fn clear_not_matching_logs(&mut self, last_prev_log_index: usize) {
@@ -535,15 +415,6 @@ impl Raft {
     }
 
     async fn apply_log_to_state_machine(&mut self, log: LogEntry) {
-        // let serialized_res = bincode::serialize(&log);
-        // match serialized_res {
-        //     Err(msg) => {
-        //         panic!("Panic induced by the author; bincode error: {}", msg);
-        //     }
-        //     Ok(serialized_log) => {
-        //         self.state_machine.apply(&serialized_log).await;
-        //     }
-        // }
         let LogEntry { content, term: _, timestamp: _ } = log;
         if let LogEntryContent::Command { data, client_id: _, sequence_num: _, lowest_sequence_num_without_response: _ } = content {
             self.state_machine.apply(&data).await;
@@ -568,16 +439,12 @@ impl Raft {
     async fn handle_append_entries(&mut self, append_entries: AppendEntriesArgs, header: RaftMessageHeader) {
         let last_verified_log_index = self.get_last_verified_log_index(&append_entries);
 
-        // println!("{:?}", append_entries);
 
         let AppendEntriesArgs { prev_log_index, prev_log_term, mut entries, leader_commit } = append_entries;
 
-        // println!("last verified: {}", last_verified_log_index);
 
         let RaftMessageHeader{source, term} = header;
 
-        // TODO here loops
-        // println!("msg term: {} from {}", term, source);
         // we got a message from an older term
         if self.persistent_state.current_term > term {
             self.send_append_entry_response(false, last_verified_log_index, source).await;
@@ -586,7 +453,6 @@ impl Raft {
             // we have rejected the message with a smaller term
             // now the term is at least as high as ours
             if self.persistent_state.current_term < term || self.is_candidate() || self.leader_id.is_none() {
-                // println!("converting {} -> {}", self.persistent_state.current_term, term);
                 self.convert_to_follower(term, Some(source)).await;
             }
             else {
@@ -598,15 +464,12 @@ impl Raft {
                 // reset is issued additionally during conversion
             }
 
-            // self.reset_election_timer().await;
 
             // process the request
             if !self.are_logs_matching(prev_log_index, prev_log_term) {
-                // println!("NOT matching");
                 self.send_append_entry_response(false, last_verified_log_index, source).await;
             }
             else {
-                // println!("Matching");
                 /*
                 Iteratively, we have found the first matching log
                 since the leader decremented the last matching index
@@ -625,30 +488,8 @@ impl Raft {
 
     fn update_match_idx(&mut self, follower_id: Uuid, last_verified_idx: usize) {
         self.match_index.insert(follower_id, last_verified_idx);
-        // let follower_val = self.match_index.get_mut(&follower_id);
-        // match follower_val {
-        //     None => {
-        //         self.match_index.insert(follower_id, last_verified_idx);
-        //     },
-        //     Some(val) => {
-        //         *val = last_verified_idx;
-        //     }
-        // }
     }
 
-    // fn get_last_matching_idx_data(&self, follower_id: Uuid) -> (usize, u64) {
-    //     let follower_data = self.match_index.get(&follower_id);
-    //     match follower_data {
-    //         None => {return (0, 0);},
-    //         Some(log_idx) => {
-    //             let term = self.persistent_state.log[*log_idx].term;
-
-    //             return (*log_idx, term);
-    //         }
-    //     }
-
-    //     // unimplemented!()
-    // }
 
     fn get_prev_idx_term(&self, follower_id: Uuid) -> (usize, u64) {
         let next_idx_res = self.next_index.get(&follower_id);
@@ -663,13 +504,11 @@ impl Raft {
                 return (prev_idx, prev_log.term);
             }
         }
-        // unimplemented!()
     }
 
     fn get_append_entry(&self, entries: Vec<LogEntry>, follower_id: Uuid) -> RaftMessage{
         let header = self.get_self_header();
         let (prev_idx, prev_term) = self.get_prev_idx_term(follower_id);
-        // println!("entires: {:?}", entries);
         let args = AppendEntriesArgs{
             prev_log_index: prev_idx,
             prev_log_term: prev_term,
@@ -685,17 +524,6 @@ impl Raft {
         let next_to_insert = last_verified_idx + 1;
         // the value is updated
         self.next_index.insert(follower_id, next_to_insert);
-
-        // let next_idx = self.next_index.get_mut(&follower_id);
-
-        // match next_idx {
-        //     None => {
-        //         self.next_index.insert(follower_id, next_to_insert);
-        //     },
-        //     Some(idx) => {
-        //         *idx = next_to_insert;
-        //     }
-        // }
     }
 
     fn update_decrement_next_idx(&mut self, follower_id: Uuid, last_verified_idx: usize) {
@@ -717,9 +545,7 @@ impl Raft {
 
         if let Some(match_idx) = match_res {
             let num_logs_to_send = self.get_last_log_idx().saturating_sub(*match_idx);
-            // println!("match idx {}, last_log_idx {} num to send {}", *match_idx, self.get_last_log_idx(), num_logs_to_send);
             let logs_per_batch = min(num_logs_to_send, self.config.append_entries_batch_size);
-            // println!("logs per batch {}", logs_per_batch);
             let end_range_first_idx_not_to_be_sent = logs_per_batch + match_idx + 1;
             let start_range_first_idx_to_be_sent = min(match_idx + 1, end_range_first_idx_not_to_be_sent);
             /*
@@ -735,22 +561,11 @@ impl Raft {
             let entries_to_append = &self.persistent_state.log[start_range_first_idx_to_be_sent..end_range_first_idx_not_to_be_sent];
             let append_entry = self.get_append_entry(entries_to_append.to_vec(), follower_id);
 
-            // println!("last idx {} | match_idx: {} | entries to send: {:?}", self.get_last_log_idx(), *match_idx, append_entry);
 
             self.sender.send(&follower_id, append_entry).await;
         }
     }
 
-    // fn serialize_log(&self, log: &LogEntry) -> Vec<u8> {
-    //     let serialize_log = bincode::serialize(&log);
-        
-    //     match serialize_log {
-    //         Err(msg) => {
-    //             panic!("Panic induced by author - bincode error: {}", msg);
-    //         },
-    //         Ok(serialized) => {return serialized;},
-    //     }
-    // }
 
     // After the crash - the sender might be missing
     fn get_sender_send_command(&mut self, response: ClientRequestResponse) {
@@ -772,7 +587,6 @@ impl Raft {
         self.get_sender_send_command(response);
     }
 
-    // fn send_response_to_client(&self, response: ClientRequestResponse, )
     async fn send_command_response_to_client_apply_to_state(&mut self) {
         let log = &self.persistent_state.log[self.last_applied];
         let LogEntry { content, term: _, timestamp: _ } = log.clone();
@@ -806,11 +620,8 @@ impl Raft {
 
     async fn commit_and_send_current_entry_and_maybe_previous_if_majority_agrees(&mut self, last_verified_idx: usize) {
         if last_verified_idx > self.commit_index {
-            println!("last verified: {} commit {} last log {} log {:?}\n", last_verified_idx, self.commit_index, self.get_last_log_idx(), self.persistent_state.log);
             // with new success - the majority might agree now
             let agreed = self.match_index.values().filter(|&&x| x >= last_verified_idx).count();
-            println!("agreed: {}", agreed);
-            println!("set: {:?}", self.match_index);
             if agreed > (self.config.servers.len() / 2) {
                 // the majority agrees
                 if self.persistent_state.current_term == self.persistent_state.log[last_verified_idx].term {
@@ -863,12 +674,10 @@ impl Raft {
                 // last_verified_log - last idx present in both server and a follower
                 // last_log_idx - idx of the last log in the server
                 // send messages only if the follower is behind the server
-                // if last_verified_log_index != self.get_last_log_idx() {
                 self.update_match_idx(source, last_verified_log_index);
                 self.update_next_idx_after_success(source, last_verified_log_index);
 
                 if last_verified_log_index != self.get_last_log_idx() {
-                    // println!("last_verified is not batch");
                     // all logs are replicated on the given server
                     // for heartbeat - it would eventually send empty messages
                     self.send_up_to_batch_size(source).await;
@@ -954,18 +763,11 @@ impl Raft {
 
 
     async fn handle_client_command_request(&mut self, command: ClientRequestContent, reply_to: UnboundedSender<ClientRequestResponse>) {
-            // if self.process_type == ProcessType::Leader {
-                self.add_client_command_to_log(command).await;
+            self.add_client_command_to_log(command).await;
 
-                let command_idx = self.get_last_log_idx();
-                self.client_requests.insert(command_idx, reply_to); // TODO check log update? no, might be overwritten if the leader changes, but it's a volatile state so it wouldn't be saved
-                self.send_already_added_new_log_to_ready_followers().await;
-            // }
-            // else {
-            //     // inform that you are not a leader, send leader id
-                
-            //     self.decline_client_command_send_leader_id(command, reply_to);
-            // }
+            let command_idx = self.get_last_log_idx();
+            self.client_requests.insert(command_idx, reply_to); 
+            self.send_already_added_new_log_to_ready_followers().await;
         }
 
     async fn broadcast_request_vote(&mut self) {
@@ -1031,14 +833,11 @@ impl Handler<RaftMessage> for Raft {
 impl Handler<ClientRequest> for Raft {
     async fn handle(&mut self, _self_ref: &ModuleRef<Self>, msg: ClientRequest) {
             let ClientRequest { reply_to, content } = msg;
-            // println!("got client request: {:?}", self.process_type);
             if self.process_type != ProcessType::Leader {
                 // inform that you are not a leader, send leader id
-                // println!("going to decline {}", self.config.self_id);
                 self.decline_client_command_send_leader_id(content, reply_to);
             }
             else {
-                // println!("not declining");
                 match &content {
                     ClientRequestContent::Command { command: _, client_id: _, sequence_num: _, lowest_sequence_num_without_response: _ } => {
                         self.handle_client_command_request(content, reply_to).await;
@@ -1068,7 +867,6 @@ impl Handler<ElectionTimeout> for Raft {
     async fn handle(&mut self, _self_ref: &ModuleRef<Self>, _: ElectionTimeout) {
         match &mut self.process_type  {
             ProcessType::Follower => {
-                println!("timeouted follower {} leader {:?}", self.config.self_id, self.leader_id);
                 self.convert_to_a_candidate_start_election().await;
             },
             ProcessType::Candidate { votes_received } => {
@@ -1082,7 +880,6 @@ impl Handler<ElectionTimeout> for Raft {
             },
             ProcessType::Leader => {
                 // not affected - skip
-                println!("timoeuted leaer");
                 if self.heartbeat_response.len() < (self.config.servers.len() / 2) {
                     self.convert_to_follower(self.persistent_state.current_term, None).await;
                 }
