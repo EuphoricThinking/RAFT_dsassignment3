@@ -534,6 +534,20 @@ impl Raft {
         }
     }
 
+    fn update_decrement_next_idx(&mut self, follower_id: Uuid, last_verified_idx: usize) {
+        let next_to_insert = last_verified_idx.saturating_sub(1);
+        let next_idx = self.next_index.get_mut(&follower_id);
+
+        match next_idx {
+            None => {
+                self.next_index.insert(follower_id, next_to_insert);
+            },
+            Some(idx) => {
+                *idx = idx.saturating_sub(1);
+            }
+        }
+    }
+
     async fn send_up_to_batch_size(&mut self, follower_id: Uuid) {
         let match_res = self.match_index.get(&follower_id);
 
@@ -568,6 +582,7 @@ impl Raft {
         }
     }
 
+    // After the crash - the sender might be missing
     fn get_sender_send_command(&mut self, response: ClientRequestResponse) {
         let sender_res= self.client_requests.remove(&self.last_applied);
 
@@ -684,6 +699,7 @@ impl Raft {
             }
             else {
                 // we are still a leader
+                self.update_decrement_next_idx(source, last_verified_log_index);
             }
         }
     }
